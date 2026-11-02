@@ -220,6 +220,36 @@ def test_report_length_limits_and_style():
     assert "ASD-STE100" not in _with_style("base", LLMConfig(report_style="plain"))
 
 
+def test_plain_style_keeps_full_report():
+    from meeting_transcriber.postprocessing.meeting_report import (
+        _limit_report,
+        _limits,
+        _with_style,
+    )
+
+    plain = LLMConfig(enabled=True, report_style="plain")
+    assert _limits(plain).max_topics == 12
+    assert _limits(plain).max_items is None
+    assert _limits(plain).max_summary_sentences == 10
+    assert "ASD-STE100" not in _with_style("base", plain)
+
+    report = {
+        "title": "Заголовок",
+        "summary": "Первое. Второе. Третье. Четвёртое. Пятое. Шестое. Седьмое. Восьмое. Девятое. Десятое. Одиннадцатое.",
+        "topics": [{"title": "Тема", "summary": "Длинный текст " * 100, "segment_refs": []}],
+        "decisions": [{"text": f"Решение {i}", "confidence": i / 10} for i in range(10)],
+        "action_items": [{"task": f"Задача {i}"} for i in range(10)],
+        "risks": [{"text": f"Риск {i}"} for i in range(10)],
+        "open_questions": [{"text": f"Вопрос {i}"} for i in range(10)],
+        "uncertain": [{"text": f"Проверить {i}"} for i in range(10)],
+    }
+    _limit_report(report, plain)
+    assert len(report["decisions"]) == 10
+    assert len(report["risks"]) == 10
+    assert len([s for s in report["summary"].split(".") if s.strip()]) == 10
+    assert len(report["topics"][0]["summary"]) > 1000
+
+
 def test_report_disabled_returns_nothing():
     report, warnings = generate_meeting_report(
         _transcript(), LLMConfig(enabled=False), client=FakeLLM()

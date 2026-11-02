@@ -52,6 +52,12 @@ def build_parser() -> argparse.ArgumentParser:
     transcribe.add_argument("--skip-diarization", action="store_true")
     transcribe.add_argument("--skip-llm", action="store_true")
     transcribe.add_argument("--speaker-map", type=Path, default=None)
+    transcribe.add_argument(
+        "--report-style",
+        choices=["asd-ste100", "plain"],
+        default=None,
+        help="Report profile: short ASD-STE100 or full plain",
+    )
     transcribe.add_argument("--device", choices=["cuda", "cpu", "auto"], default=None)
     transcribe.add_argument(
         "--audio-stream",
@@ -102,6 +108,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     report.add_argument("transcript", type=Path, help="Path to the transcript JSON")
     report.add_argument("--map", type=Path, default=None, help="Speaker names YAML")
+    report.add_argument(
+        "--report-style",
+        choices=["asd-ste100", "plain"],
+        default=None,
+        help="Report profile: short ASD-STE100 or full plain",
+    )
     _add_config_options(report)
 
     glossary = subparsers.add_parser("build-glossary", help="Extract terminology from a code base")
@@ -226,6 +238,8 @@ def _transcribe(args: argparse.Namespace, cfg: AppConfig) -> int:
         cfg.language = args.language
     if args.audio_stream is not None:
         cfg.audio.audio_stream = args.audio_stream
+    if args.report_style is not None:
+        cfg.llm.report_style = args.report_style
     pipeline = Pipeline(
         cfg,
         force=args.force,
@@ -322,6 +336,8 @@ def _label_speakers(args: argparse.Namespace) -> int:
 def _report(args: argparse.Namespace, cfg: AppConfig) -> int:
     transcript_path = args.transcript.expanduser().resolve()
     transcript = persistence.load_transcript(transcript_path)
+    if args.report_style is not None:
+        cfg.llm.report_style = args.report_style
     if args.map:
         applied = apply_speaker_names(transcript, load_speaker_map(args.map))
         print(f"applied {applied} speaker name(s)")

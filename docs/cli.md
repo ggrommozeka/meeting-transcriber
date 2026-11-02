@@ -38,6 +38,7 @@ meeting-transcriber transcribe data/input/meeting.webm \
 | `--skip-diarization` | ASR only |
 | `--skip-llm` | do not generate the report |
 | `--speaker-map FILE` | apply display names before report/output |
+| `--report-style STYLE` | `asd-ste100` (short) or `plain` (full report) |
 | `--device cuda\|cpu\|auto` | override device |
 | `--audio-stream N` | 0-based audio track index (FFmpeg `0:a:N`) |
 | `--force` | ignore cached stages and overwrite outputs |
@@ -87,6 +88,7 @@ meeting-transcriber report data/output/meeting.json \
 | Option | Meaning |
 |---|---|
 | `--map FILE` | apply speaker names before generation |
+| `--report-style STYLE` | `asd-ste100` (short) or `plain` (full report) |
 
 Writes `<name>.report.json`, `<name>.report.md`, and appends the report to
 `<name>.markdown`.

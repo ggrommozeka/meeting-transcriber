@@ -302,9 +302,9 @@ fallback if needed), then creates the 16 kHz mono WAV.
 | `--max-speakers N` | CLI / YAML | upper bound, default 20 |
 | `terminology.profiles` | YAML | project-specific glossary |
 | `terminology.threshold` | YAML | higher = fewer corrections |
-| `llm.max_topics` | YAML | number of consolidated themes (default 6) |
-| `llm.max_items_per_section` | YAML | max decisions/tasks/risks/questions (default 6) |
-| `llm.report_style` | YAML | `asd-ste100` (default) or `plain` |
+| `llm.max_topics` | YAML | number of consolidated themes (default 6; only for `asd-ste100`) |
+| `llm.max_items_per_section` | YAML | max decisions/tasks/risks/questions (default 6; only for `asd-ste100`) |
+| `llm.report_style` | YAML / CLI | `asd-ste100` (short, default) or `plain` (full report) |
 | `llm.chunk_chars` | YAML | LLM chunk size; smaller is safer for context |
 | `LLAMA_CTX` | env at server start | llama-server context (default 8192) |
 

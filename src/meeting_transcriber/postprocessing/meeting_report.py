@@ -14,6 +14,7 @@ import hashlib
 import json
 import re
 from collections.abc import Callable
+from dataclasses import dataclass
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
@@ -31,10 +32,9 @@ SYSTEM_PROMPT = """Ты — ассистент протоколирования 
 3. "decisions" — только явно согласованные решения или выбор. Не записывай сюда предложения, идеи и общее обсуждение.
 4. "action_items" — только конкретные следующие действия. owner и due указывай, только если они явно названы, иначе null.
 5. "topics" — 2–4 крупные темы фрагмента, а не по одной теме на реплику.
-6. Пиши кратко: summary темы — не более 2 предложений.
-7. Если данных недостаточно, укажи это в "uncertain" и поставь confidence ниже 0.6.
-8. Не переписывай речи и не меняй их смысл.
-9. Верни только валидный JSON без markdown-ограждений.
+6. Если данных недостаточно, укажи это в "uncertain" и поставь confidence ниже 0.6.
+7. Не переписывай речи и не меняй их смысл.
+8. Верни только валидный JSON без markdown-ограждений.
 
 Схема ответа:
 {
@@ -51,16 +51,47 @@ CONSOLIDATE_SYSTEM_PROMPT = """Ты — редактор протокола со
 1. Объедини близкие темы в крупные смысловые блоки. Не создавай больше тем, чем указано в запросе.
 2. Не добавляй фактов, которых нет в исходных темах. Не придумывай имена, сроки и решения.
 3. Для каждой темы объедини все ссылки на сегменты (segment_refs) из исходных тем. Не теряй ссылки.
-4. Пиши summary темы не более 2 предложений.
-5. Верни только валидный JSON: {"topics": [{"title": "строка", "summary": "строка", "segment_refs": ["S1"]}]}"""
+4. Верни только валидный JSON: {"topics": [{"title": "строка", "summary": "строка", "segment_refs": ["S1"]}]}"""
 
 SUMMARY_SYSTEM_PROMPT = """Ты — редактор протокола совещания. Тебе дан список тем, решений, задач, рисков и вопросов, извлечённых из транскрипта.
 Строгие правила:
 1. Не добавляй фактов, которых нет в списке. Не придумывай имена, сроки и решения.
-2. Сформулируй короткое название совещания (не более 10 слов) и резюме на 3–5 предложений.
+2. Сформулируй короткое название совещания и резюме.
 3. Верни только валидный JSON без markdown-ограждений: {"title": "...", "summary": "..."}"""
 
 ProgressFn = Callable[[str], None]
+
+
+@dataclass(frozen=True)
+class ReportLimits:
+    max_topics: int
+    max_items: int | None
+    max_summary_sentences: int
+    max_topic_summary_chars: int | None
+
+
+def _limits(cfg: LLMConfig) -> ReportLimits:
+    """Return the effective report profile.
+
+    ``asd-ste100`` uses the short form configured in YAML. ``plain`` restores the
+    full report used before the short-form change: 12 topics, no item cap, and
+    a longer summary.
+    """
+
+    if cfg.report_style == "asd-ste100":
+        return ReportLimits(
+            max_topics=cfg.max_topics,
+            max_items=cfg.max_items_per_section,
+            max_summary_sentences=cfg.max_summary_sentences,
+            max_topic_summary_chars=cfg.max_topic_summary_chars,
+        )
+    return ReportLimits(
+        max_topics=12,
+        max_items=None,
+        max_summary_sentences=10,
+        max_topic_summary_chars=None,
+    )
+
 
 STE_RULES = """Стиль изложения — ASD-STE100 (Simplified Technical English), адаптированный для русского языка:
 - Пиши короткими предложениями: не более 20 слов.
@@ -69,6 +100,9 @@ STE_RULES = """Стиль изложения — ASD-STE100 (Simplified Technica
 - Используй один и тот же термин для одного понятия; не используй синонимы.
 - Не используй метафоры, рекламные оценки, канцелярит и вводные фразы.
 - Не повторяй мысль разными словами.
+- Заголовок — не более 10 слов.
+- Каждый summary темы — не более 2 предложений.
+- Резюме — не более 5 предложений.
 - Каждый пункт содержит только факт и ссылки S<n>."""
 
 
@@ -420,17 +454,18 @@ def _consolidate_topics(
     cfg: LLMConfig,
     valid: set[str],
 ) -> list[str]:
-    """Merge granular topics into ``max_topics`` without exceeding context.
+    """Merge granular topics into the profile's target without exceeding context.
 
     Topics are consolidated in context-sized groups; the loop halves the number
     of topics until the target is reached or no further progress is made. A
     deterministic fallback guarantees the cap and preserves references.
     """
 
+    target = _limits(cfg).max_topics
     warnings: list[str] = []
     topics = report.get("topics") or []
     for _ in range(4):
-        if len(topics) <= cfg.max_topics:
+        if len(topics) <= target:
             break
         groups = _group_topics(topics, cfg.merge_chars)
         if len(groups) <= 1 and len(groups[0]) > 1:
@@ -438,8 +473,8 @@ def _consolidate_topics(
             groups = [groups[0][:half], groups[0][half:]]
         consolidated: list[dict[str, Any]] = []
         for group in groups:
-            share = max(1, round(cfg.max_topics * len(group) / len(topics)))
-            limit = max(1, min(cfg.max_topics, share))
+            share = max(1, round(target * len(group) / len(topics)))
+            limit = max(1, min(target, share))
             merged = _consolidate_group(client, group, limit, cfg, valid)
             if merged is not None and len(merged) > limit:
                 retried = _consolidate_group(
@@ -454,12 +489,12 @@ def _consolidate_topics(
                 )
             consolidated.extend(merged or group)
         if len(consolidated) >= len(topics):
-            topics = _merge_excess(consolidated, cfg.max_topics)
+            topics = _merge_excess(consolidated, target)
             warnings.append("topic consolidation reached the deterministic cap")
             break
         topics = consolidated
-    if len(topics) > cfg.max_topics:
-        topics = _merge_excess(topics, cfg.max_topics)
+    if len(topics) > target:
+        topics = _merge_excess(topics, target)
         warnings.append("topic consolidation reached the deterministic cap")
     report["topics"] = topics
     return warnings
@@ -489,7 +524,7 @@ def _synthesize_summary(
         "Данные протокола:\n"
         + json.dumps(payload, ensure_ascii=False)
         + f"\nВерни заголовок (не более 10 слов) и резюме не более "
-        f"{cfg.max_summary_sentences} предложений."
+        f"{_limits(cfg).max_summary_sentences} предложений."
     )
     if len(user) > cfg.merge_chars:
         payload["topics"] = payload["topics"][:20]
@@ -534,24 +569,30 @@ def _humanize_speaker_ids(report: dict[str, Any], transcript: Transcript) -> Non
 
 
 def _limit_report(report: dict[str, Any], cfg: LLMConfig) -> None:
-    """Apply hard length limits so the report stays short and scannable."""
+    """Apply the selected profile's hard limits."""
 
-    max_items = cfg.max_items_per_section
-    for key in ("decisions", "action_items"):
-        items = report.get(key) or []
-        items.sort(key=lambda item: float(item.get("confidence") or 0.0), reverse=True)
-        report[key] = items[:max_items]
-    for key in ("risks", "open_questions", "uncertain"):
-        report[key] = (report.get(key) or [])[:max_items]
+    limits = _limits(cfg)
+    if limits.max_items is not None:
+        max_items = limits.max_items
+        for key in ("decisions", "action_items"):
+            items = report.get(key) or []
+            items.sort(
+                key=lambda item: float(item.get("confidence") or 0.0), reverse=True
+            )
+            report[key] = items[:max_items]
+        for key in ("risks", "open_questions", "uncertain"):
+            report[key] = (report.get(key) or [])[:max_items]
 
-    for topic in report.get("topics") or []:
-        topic["summary"] = _shorten_chars(
-            str(topic.get("summary") or ""), cfg.max_topic_summary_chars
-        )
+    if limits.max_topic_summary_chars is not None:
+        for topic in report.get("topics") or []:
+            topic["summary"] = _shorten_chars(
+                str(topic.get("summary") or ""), limits.max_topic_summary_chars
+            )
     report["summary"] = _shorten_sentences(
-        str(report.get("summary") or ""), cfg.max_summary_sentences
+        str(report.get("summary") or ""), limits.max_summary_sentences
     )
-    report["title"] = _shorten_chars(str(report.get("title") or ""), 140)
+    if limits.max_topic_summary_chars is not None:
+        report["title"] = _shorten_chars(str(report.get("title") or ""), 140)
 
 
 def _shorten_sentences(text: str, max_sentences: int) -> str:

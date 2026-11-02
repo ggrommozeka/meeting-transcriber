@@ -194,9 +194,14 @@ llm:
   model: qwen3.5-9b
   max_topics: 6
   max_items_per_section: 6
-  report_style: asd-ste100
+  report_style: asd-ste100   # "plain" = full report, no short-form caps
   chunk_chars: 5000
 ```
+
+`report_style: asd-ste100` returns the short form (6 topics, 6 items per section,
+5-sentence summary). `report_style: plain` returns the full report (12 topics,
+no per-section cap, summary up to 10 sentences). Override per run with
+`--report-style plain`.
 
 ## Docker
 
