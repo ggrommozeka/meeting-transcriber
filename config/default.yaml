@@ -95,7 +95,13 @@ llm:
   chunk_chars: 5000
   merge_chars: 12000
   # Consolidate granular chunk topics into this many themes.
-  max_topics: 12
+  max_topics: 6
+  # Keep the report short: at most N items per section.
+  max_items_per_section: 6
+  max_summary_sentences: 5
+  max_topic_summary_chars: 350
+  # "asd-ste100": short, simple, active sentences; "plain": no extra rules.
+  report_style: asd-ste100
   # Context is set when starting llama-server (`-c 8192`).
   num_ctx: 8192
   retries: 1

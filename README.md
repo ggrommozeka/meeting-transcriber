@@ -192,7 +192,9 @@ llm:
   enabled: true
   base_url: http://127.0.0.1:8080/v1
   model: qwen3.5-9b
-  max_topics: 12
+  max_topics: 6
+  max_items_per_section: 6
+  report_style: asd-ste100
   chunk_chars: 5000
 ```
 
@@ -262,7 +264,9 @@ Real-model smoke test:
 - Native 87-minute run: 2m31s, 945 segments, 8 speakers, 4612 MiB peak VRAM.
 - Docker image builds (8.14 GB) and runs the full recording: 2m40s, 918
   segments, 8 speakers, 4612 MiB peak.
-- LLM report on the same meeting: 12 topics, 6 decisions, 10 action items.
+- LLM report on the 65-minute concatenated meeting: 6 topics, 6 decisions,
+  6 action items, 6 risks, 6 open questions (all capped).
+- Report wording follows ASD-STE100-style rules by default.
 - WER/DER against ground truth were not measured; the Docker LLM path is
   intentionally host-side; the base image tag is not digest-pinned.
 

@@ -42,8 +42,11 @@ default chat template the model spends the whole token budget in
 
 Prompt/architecture changes were required in addition to the model:
 
-* topic consolidation from 29 granular items to at most 12 themes;
+* topic consolidation from 29 granular items to at most 6 themes;
 * strict definition of a decision (explicit agreement, not discussion);
+* strict section limits: at most 6 items per section and a 5-sentence summary;
+* ASD-STE100-based style rules: short sentences, one idea per sentence, active
+  voice, consistent terminology, no marketing language;
 * context-sized grouping for consolidation so the prompt fits 8k;
 * deterministic aggregation, so the LLM cannot drop decisions/tasks during a
   merge;

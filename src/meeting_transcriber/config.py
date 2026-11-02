@@ -120,7 +120,11 @@ class LLMConfig:
     max_tokens: int = 4096
     chunk_chars: int = 5000
     merge_chars: int = 12000
-    max_topics: int = 12
+    max_topics: int = 6
+    max_items_per_section: int = 6
+    max_summary_sentences: int = 5
+    max_topic_summary_chars: int = 350
+    report_style: str = "asd-ste100"
     num_ctx: int = 8192
     retries: int = 1
 
@@ -308,5 +312,13 @@ def validate_config(cfg: AppConfig) -> None:
         raise ConfigError("llm.retries must be >= 0")
     if cfg.llm.max_topics < 1:
         raise ConfigError("llm.max_topics must be >= 1")
+    if cfg.llm.max_items_per_section < 1:
+        raise ConfigError("llm.max_items_per_section must be >= 1")
+    if cfg.llm.max_summary_sentences < 1:
+        raise ConfigError("llm.max_summary_sentences must be >= 1")
+    if cfg.llm.max_topic_summary_chars < 80:
+        raise ConfigError("llm.max_topic_summary_chars must be >= 80")
+    if cfg.llm.report_style not in {"asd-ste100", "plain"}:
+        raise ConfigError("llm.report_style must be 'asd-ste100' or 'plain'")
     if cfg.llm.num_ctx < 2048:
         raise ConfigError("llm.num_ctx must be >= 2048")

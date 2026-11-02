@@ -134,10 +134,13 @@ The transcript is complete without an LLM. Meeting minutes are opt-in and talk
 to a local OpenAI-compatible endpoint (llama.cpp server).
 Long transcripts use a hierarchical map-reduce flow: `llm.chunk_chars` chunks are
 summarised into structured JSON, then **aggregated deterministically** (near
-duplicates merged; distinct decisions/tasks preserved). Only the title and
-summary are LLM-generated at the end. The LLM only sees a segment-indexed
-transcript, and every `S<n>` reference is validated against the real segment ids.
-Speaker names are user-provided; the LLM may not invent them.
+duplicates merged; distinct decisions/tasks preserved). Themes are consolidated
+to `llm.max_topics`, and each section is capped at
+`llm.max_items_per_section`. The report uses the `asd-ste100` style by default:
+short sentences, one idea per sentence, active voice, one term per concept. The
+LLM is asked only for the final title and summary. Every `S<n>` reference is
+validated against the real segment ids. Speaker names are user-provided; the LLM
+may not invent them.
 
 Speaker display names are an output-layer concern: `speaker_id` stays immutable
 in JSON, names are applied by `label-speakers` or `--speaker-map`, and no ASR or

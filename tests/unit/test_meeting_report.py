@@ -192,6 +192,34 @@ def test_compact_reference_rendering():
     assert _format_refs([]) == ""
 
 
+def test_report_length_limits_and_style():
+    from meeting_transcriber.postprocessing.meeting_report import (
+        _limit_report,
+        _with_style,
+    )
+
+    report = {
+        "title": "Очень длинный заголовок " * 20,
+        "summary": "Первое. Второе. Третье. Четвёртое. Пятое. Шестое. Седьмое.",
+        "topics": [{"title": "Тема", "summary": "Слово " * 200, "segment_refs": []}],
+        "decisions": [{"text": f"Решение {i}", "confidence": i / 10} for i in range(10)],
+        "action_items": [{"task": f"Задача {i}", "confidence": i / 10} for i in range(10)],
+        "risks": [{"text": f"Риск {i}"} for i in range(10)],
+        "open_questions": [{"text": f"Вопрос {i}"} for i in range(10)],
+        "uncertain": [{"text": f"Проверить {i}"} for i in range(10)],
+    }
+    cfg = LLMConfig(enabled=True, max_items_per_section=6, max_summary_sentences=5)
+    _limit_report(report, cfg)
+    assert len(report["decisions"]) == 6
+    assert len(report["action_items"]) == 6
+    assert len(report["risks"]) == 6
+    assert report["decisions"][0]["text"] == "Решение 9"
+    assert len(report["summary"].split(". ")) <= 5
+    assert len(report["topics"][0]["summary"]) <= cfg.max_topic_summary_chars + 1
+    assert "ASD-STE100" in _with_style("base", cfg)
+    assert "ASD-STE100" not in _with_style("base", LLMConfig(report_style="plain"))
+
+
 def test_report_disabled_returns_nothing():
     report, warnings = generate_meeting_report(
         _transcript(), LLMConfig(enabled=False), client=FakeLLM()
