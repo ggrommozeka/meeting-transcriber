@@ -1,0 +1,111 @@
+# Meeting transcriber configuration.
+# Relative paths resolve against paths.root. Run commands from the repository
+# root (or keep paths.root pointing at it).
+language: ru
+meeting_id: null
+
+paths:
+  root: .
+  models_dir: models
+  work_dir: work
+  output_dir: data/output
+  terminology_dir: config/terminology
+
+audio:
+  sample_rate: 16000
+  channels: 1
+  ffmpeg: ffmpeg
+  ffprobe: ffprobe
+  # For video input: copy the selected track losslessly to audio_original.mka
+  # before creating the 16 kHz mono derivative.
+  keep_original: true
+  # 0-based audio stream index (FFmpeg 0:a:N); useful for multi-track videos.
+  audio_stream: 0
+
+asr:
+  backend: whisper
+  model_dir: whisper-large-v3-turbo-ct2
+  device: cuda
+  compute_type: float16
+  cpu_threads: 4
+  beam_size: 5
+  word_timestamps: true
+  vad_filter: true
+  vad_min_silence_ms: 500
+  condition_on_previous_text: false
+  initial_prompt: >-
+    Совещание на русском языке с английскими техническими терминами:
+    CMake, Qt, VTK, API, GPU, Python, C++, Git, Docker.
+  chunk_seconds: 900
+  overlap_seconds: 15
+  local_files_only: true
+
+diarization:
+  enabled: true
+  backend: nemo
+  device: cuda
+  speaker_model: speakerverification_en_titanet_large.nemo
+  # Upper bound for automatic speaker counting. 20 leaves headroom for the
+  # target 8-15 participant meetings without fixing the exact count.
+  max_speakers: 20
+  # Set to a number when the exact participant count is known.
+  num_speakers: null
+  vad_threshold: 0.5
+  vad_min_speech_ms: 250
+  vad_min_silence_ms: 500
+  vad_speech_pad_ms: 100
+  window_lengths: [1.5, 1.25, 1.0, 0.75, 0.5]
+  shift_lengths: [0.75, 0.625, 0.5, 0.375, 0.1]
+  multiscale_weights: [1, 1, 1, 1, 1]
+  enhanced_count_thres: 80
+  max_rp_threshold: 0.25
+  sparse_search_volume: 30
+  # Recordings longer than 30 minutes switch to single-scale embeddings to
+  # avoid an O(N^2) clustering matrix that does not fit in 8 GB VRAM.
+  long_audio_threshold_seconds: 1800
+  long_audio_window: 1.5
+  long_audio_shift: 0.75
+  keep_intermediate: false
+
+terminology:
+  enabled: true
+  profiles: [general-it]
+  glossary_files: []
+  threshold: 0.86
+  apply_corrections: true
+  fuzzy: true
+  # Phonetic matching is off by default: on long meetings it can replace
+  # ordinary Russian words that merely sound similar to a term. Enable it only
+  # for a carefully curated project glossary.
+  phonetic: false
+  max_ngram: 5
+  ambiguous_margin: 0.04
+
+llm:
+  enabled: true
+  # llama.cpp server (scripts/start_llama_server.sh)
+  base_url: http://127.0.0.1:8080/v1
+  model: qwen3.5-9b
+  api_key_env: OPENAI_API_KEY
+  timeout: 600
+  temperature: 0.1
+  max_tokens: 4096
+  # Map-reduce: chunk size for the first pass and size limit for merges.
+  # Keep chunks well below the model context window.
+  chunk_chars: 5000
+  merge_chars: 12000
+  # Consolidate granular chunk topics into this many themes.
+  max_topics: 12
+  # Context is set when starting llama-server (`-c 8192`).
+  num_ctx: 8192
+  retries: 1
+
+output:
+  formats: [json, markdown, srt]
+  write_words: true
+  overwrite: false
+
+pipeline:
+  resume: true
+  continue_on_diarization_error: true
+  keep_work_dir: true

@@ -1,0 +1,7 @@
+-r base.txt
+# Torch is usually provided by the CUDA base image on servers. For a host
+# virtualenv install a CUDA build explicitly first, for example:
+#   pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cu124
+torch==2.6.0
+nemo_toolkit[asr]==2.6.2
+silero-vad==6.2.3

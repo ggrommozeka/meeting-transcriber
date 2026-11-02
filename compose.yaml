@@ -1,0 +1,42 @@
+name: meeting-transcriber
+
+services:
+  transcriber:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: meeting-transcriber:0.1.0
+    # Match the host UID/GID so bind-mounted work/ and data/output/ are writable.
+    # Use scripts/compose.sh, which exports HOST_UID/HOST_GID automatically.
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    # No ports are published: this is a batch CLI, not a service.
+    network_mode: "none"
+    environment:
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      # Overridden UID has no home directory; give numba/matplotlib writable caches.
+      HOME: /tmp
+      NUMBA_CACHE_DIR: /tmp/numba
+      MPLCONFIGDIR: /tmp/matplotlib
+      XDG_CACHE_HOME: /tmp/.cache
+    volumes:
+      - ./models:/models:ro
+      - ./data/input:/data/input:ro
+      - ./data/output:/data/output
+      - ./work:/work
+      - ./config:/app/config:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    # Example:
+    #   docker compose run --rm transcriber transcribe /data/input/meeting.wav \
+    #     --config /app/config/docker.yaml
+    command:
+      - transcribe
+      - /data/input/meeting.wav
+      - --config
+      - /app/config/docker.yaml

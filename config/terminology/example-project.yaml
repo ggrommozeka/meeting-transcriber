@@ -1,0 +1,39 @@
+version: 1
+profile: example-project
+
+# Example project-specific glossary. Replace with terms from your own project.
+terms:
+  - canonical: vtkChartXY
+    aliases:
+      - vtk chart xy
+      - витэка чарт икс уай
+      - ви ти кей чарт икс уай
+    category: class
+    project: example-project
+
+  - canonical: vtkRenderWindow
+    aliases:
+      - втк рендер виндоу
+      - ви ти кей рендер виндоу
+    category: class
+    project: example-project
+
+  - canonical: dirty flag
+    aliases:
+      - дирти флаг
+      - dirty-флаг
+    category: concept
+    project: example-project
+
+  - canonical: Granum
+    aliases:
+      - гранум
+      - граннум
+    category: project
+    project: example-project
+
+  - canonical: CMake
+    aliases:
+      - си мейк
+    category: tool
+    project: example-project

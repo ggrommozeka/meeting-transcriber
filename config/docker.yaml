@@ -1,0 +1,26 @@
+# Container configuration: paths point at mounted volumes.
+language: ru
+
+paths:
+  root: /app
+  models_dir: /models
+  work_dir: /work
+  output_dir: /data/output
+  terminology_dir: /app/config/terminology
+
+audio:
+  ffmpeg: ffmpeg
+  ffprobe: ffprobe
+
+asr:
+  device: cuda
+
+diarization:
+  device: cuda
+
+llm:
+  # Compose runs with network_mode: "none"; enable this only if the container
+  # can reach a host llama-server (e.g. a bridge network).
+  enabled: false
+  base_url: http://host.docker.internal:8080/v1
+  model: qwen3.5-9b

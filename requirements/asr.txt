@@ -1,0 +1,5 @@
+-r base.txt
+faster-whisper==1.1.1
+# faster-whisper 1.1.1 passes av.open(metadata_errors=...), which PyAV removed
+# in 17.0. Keep PyAV below 17 until faster-whisper catches up.
+av>=11,<17

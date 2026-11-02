@@ -1,0 +1,163 @@
+version: 1
+profile: general-it
+
+terms:
+  - canonical: CMake
+    aliases: [си мейк, цмейк, cmake, "си-мейк"]
+    category: tool
+
+  - canonical: Git
+    aliases: [гит, гитхаб, git]
+    category: tool
+
+  - canonical: GitHub
+    aliases: [гитхаб, гит хаб, github]
+    category: service
+
+  - canonical: GitLab
+    aliases: [гитлаб, гит лаб]
+    category: service
+
+  - canonical: Docker
+    aliases: [докер, docker]
+    category: tool
+
+  - canonical: Kubernetes
+    aliases: [кубернетес, кубер, k8s, кубернетис]
+    category: tool
+
+  - canonical: Python
+    aliases: [пайтон, питон, python]
+    category: language
+
+  - canonical: JavaScript
+    aliases: [джаваскрипт, жабаскрипт, javascript, js]
+    category: language
+
+  - canonical: TypeScript
+    aliases: [тайпскрипт, type script]
+    category: language
+
+  - canonical: PyTorch
+    aliases: [пайторч, питорч, torch]
+    category: library
+
+  - canonical: TensorFlow
+    aliases: [тензорфлоу, тензор флоу]
+    category: library
+
+  - canonical: NumPy
+    aliases: [нампай, нампи, numpy]
+    category: library
+
+  - canonical: Qt
+    aliases: [кью т, кут, qt]
+    category: library
+
+  - canonical: VTK
+    aliases: [ви ти кей, втк, vtk]
+    category: library
+
+  - canonical: API
+    aliases: [апи, эй пи ай, api]
+    category: concept
+
+  - canonical: SDK
+    aliases: [эс ди кей, sdk]
+    category: concept
+
+  - canonical: GPU
+    aliases: [гпу, gpu, видеочип]
+    category: hardware
+
+  - canonical: CPU
+    aliases: [цпу, cpu, процессор]
+    category: hardware
+
+  - canonical: CUDA
+    aliases: [cuda, "ц у да", "си у ди эй"]
+    category: tool
+
+  - canonical: VRAM
+    aliases: [вирам, видео память, видеопамять]
+    category: hardware
+
+  - canonical: CI/CD
+    aliases: [си ай си ди, ci cd, cicd]
+    category: concept
+
+  - canonical: pull request
+    aliases: [пул реквест, пулл реквест, pull request]
+    category: concept
+
+  - canonical: merge request
+    aliases: [мерж реквест, merge request]
+    category: concept
+
+  - canonical: commit
+    aliases: [коммит, комит]
+    category: concept
+
+  - canonical: branch
+    aliases: [бранч, ветка]
+    category: concept
+
+  - canonical: repository
+    aliases: [репозиторий, репа, repo]
+    category: concept
+
+  - canonical: Dockerfile
+    aliases: [докер файл, docker file]
+    category: tool
+
+  - canonical: docker compose
+    aliases: [докер композ, docker-compose, docker compose]
+    category: tool
+
+  - canonical: NVIDIA
+    aliases: [нвидиа, энвидиа, nvidia]
+    category: company
+
+  - canonical: Hugging Face
+    aliases: [хагинг фейс, хаггинг фейс, hugging face]
+    category: company
+
+  - canonical: transformer
+    aliases: [трансформер, трансформеры]
+    category: concept
+
+  - canonical: embedding
+    aliases: [эмбеддинг, эмбединг, вложение]
+    category: concept
+
+  - canonical: tokenizer
+    aliases: [токенайзер, токенизатор]
+    category: concept
+
+  - canonical: diarization
+    aliases: [диаризация, диаризейшн, разделение говорящих]
+    category: concept
+
+  - canonical: Whisper
+    aliases: [виспер, уиспер, whisper]
+    category: model
+
+  - canonical: NeMo
+    aliases: [немо, ne mo, nemo]
+    category: library
+
+  - canonical: CMakeLists.txt
+    aliases: [си мейк листс, cmake lists]
+    category: file
+
+  - canonical: namespace
+    aliases: [неймспейс, нейм спейс, пространство имён]
+    category: concept
+
+  - canonical: refactoring
+    aliases: [рефакторинг, рефактор]
+    category: concept
+
+  - canonical: benchmark
+    aliases: [бенчмарк, бенч]
+    category: concept

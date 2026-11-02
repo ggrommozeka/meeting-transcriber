@@ -1,0 +1,6 @@
+-r base.txt
+-r asr.txt
+-r diarization.txt
+pytest>=8.0,<9
+pytest-cov>=5.0,<7
+ruff>=0.6,<1

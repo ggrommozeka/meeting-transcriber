@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Models and audio (never commit weights or recordings)
+models/*
+!models/README.md
+!models/manifest.yaml
+data/input/*
+!data/input/.gitkeep
+data/output/*
+!data/output/.gitkeep
+logs/*
+!logs/.gitkeep
+work/*
+!work/.gitkeep
+*.wav
+*.mp3
+*.m4a
+*.flac
+*.ogg
+*.mp4
+
+# Local configuration and secrets
+.env
+.env.local
+*.local.yaml
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
