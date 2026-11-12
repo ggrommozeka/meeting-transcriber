@@ -42,6 +42,9 @@ and English language data.
 source .venv/bin/activate
 ./scripts/download_models.sh        # interactive on a terminal
 ./scripts/verify_models.sh
+
+# Optional: one TUI for paths, llama.cpp, models and validation
+meeting-transcriber setup
 ```
 
 Get a transcript next to the input file:
@@ -158,6 +161,44 @@ meeting-transcriber transcribe -i meeting.mp4 --visual --llm
 
 On an 8 GB GPU, prefer the two-step workflow: stop `llama-server`, transcribe,
 then start `llama-server` and generate the report.
+
+## Interactive wizards
+
+Two Textual menus cover the whole lifecycle:
+
+```bash
+meeting-transcriber setup      # prepare the machine
+meeting-transcriber process    # convert a conversation into a report
+```
+
+### `setup`
+
+A single table-driven wizard:
+
+- choose the model directory, OCR paths and llama.cpp source;
+- `existing` — point to an already built `llama-server`;
+- `release` — download a prebuilt llama.cpp release;
+- `build` — clone the latest stable `b<number>` tag and compile it with CMake;
+- validate Python, FFmpeg, Tesseract, CUDA, llama-server, models and disk;
+- see a summary table with per-component readiness and an overall percentage;
+- download selected model groups and save choices to `config/local.yaml`.
+
+### `process`
+
+One menu for a recording:
+
+- input file and output directory (defaults to the input's directory);
+- language, diarization, speaker count, video OCR, LLM report and report style;
+- validation table only for the features you selected;
+- live stage progress and a log pane;
+- optional automatic start/stop of `llama-server` for the report.
+
+Non-interactive commands remain available for scripts and CI:
+
+```bash
+meeting-transcriber transcribe -i meeting.mp4
+meeting-transcriber transcribe-video -i meeting.mp4
+```
 
 ## Setup and models
 
@@ -347,6 +388,14 @@ visual:
   keep_code_frames: true
   report_context_chars: 1200
 
+runtime:
+  llama_server: null       # filled by `meeting-transcriber setup`
+  llama_source: existing   # existing | release | build
+  llama_tag: latest
+  llama_build_dir: ~/.local/llama.cpp
+  llama_cuda: true
+  llama_jobs: 0
+
 llm:
   enabled: true            # used by the separate `report` command
   base_url: http://127.0.0.1:8080/v1
@@ -430,7 +479,7 @@ Real-model smoke test:
 
 ## Status
 
-- 68 unit/integration tests; `ruff` clean.
+- 72 unit/integration tests; `ruff` clean.
 - Native 87-minute run: 2m31s, 945 segments, 8 speakers, 4612 MiB peak VRAM.
 - Docker image builds (8.14 GB) and runs the full recording: 2m40s, 918
   segments, 8 speakers, 4612 MiB peak.

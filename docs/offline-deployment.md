@@ -35,9 +35,9 @@ gunzip -c meeting-transcriber-image.tar.gz | docker load
 tar xzf meeting-transcriber-models.tar.gz
 
 ./scripts/compose.sh run --rm transcriber \
-  transcribe /data/input/meeting.webm \
+  transcribe -i /data/input/meeting.webm \
   --config /app/config/docker.yaml \
-  --skip-llm
+  --output-dir /data/output
 ```
 
 `./scripts/compose.sh` exports the host UID/GID so the bind-mounted `work/` and
@@ -50,7 +50,7 @@ tar xzf meeting-transcriber-models.tar.gz
 ```bash
 source .venv/bin/activate
 export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
-meeting-transcriber transcribe data/input/meeting.wav --config config/default.yaml
+meeting-transcriber transcribe -i data/input/meeting.wav --config config/default.yaml
 ```
 
 ## Local LLM report

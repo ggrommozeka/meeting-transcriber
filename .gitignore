@@ -34,6 +34,7 @@ work/*
 .env
 .env.local
 *.local.yaml
+config/local.yaml
 
 # Editors / OS
 .idea/
