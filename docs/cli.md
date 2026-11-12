@@ -33,15 +33,17 @@ transcribe_video("meeting.mp4", output_dir="out")
 
 ## Interactive wizards
 
-`setup` and `process` open Textual TUI menus. `setup` selects model paths,
-llama.cpp source (`existing`, `release`, `build`), validates the complete
-environment and shows a readiness table with an overall percentage. Choices are
-saved to `config/local.yaml`.
+`setup` and `process` open keyboard-first questionary menus. `setup` selects
+model paths, llama.cpp source (`existing`, `release`, `build`), validates the
+complete environment and shows a readiness table with an overall percentage.
+Choices are saved to `config/local.yaml`.
 
-`process` selects the input, output directory and processing options, validates
-only the required components, then runs the pipeline with live stage progress.
-Pass `-i`/`--output-dir` to prefill the menu. Both commands require a terminal;
-for scripts use `transcribe`/`transcribe-video`.
+`process` discovers media files, supports manual path entry with completion,
+selects output and processing options, validates only the required components,
+then runs the pipeline with live stage progress. Pass `-i`/`--output-dir` to
+prefill the menu. Both commands require a terminal; for scripts use
+`transcribe`/`transcribe-video`. Set `MT_TEXTUAL_FALLBACK=1` to use the old
+Textual screens.
 
 Global options accepted by subcommands that use configuration:
 

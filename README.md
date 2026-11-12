@@ -46,12 +46,17 @@ source .venv/bin/activate
 
 ## Interactive wizards
 
-Two Textual menus cover the whole lifecycle:
+Two keyboard-first menus cover the whole lifecycle:
 
 ```bash
 meeting-transcriber setup      # prepare the machine
 meeting-transcriber process    # convert a conversation into a report
 ```
+
+They use questionary: arrows/j-k navigate, numbers jump to an option, Enter
+confirms, Space toggles checkboxes. Every path step also accepts a manually
+typed path with completion. The old Textual screens remain available as a
+hidden fallback with `MT_TEXTUAL_FALLBACK=1`.
 
 ### `setup`
 
@@ -462,7 +467,7 @@ Real-model smoke test:
 
 ## Status
 
-- 74 unit/integration tests; `ruff` clean.
+- 76 unit/integration tests; `ruff` clean.
 - Native 87-minute run: 2m31s, 945 segments, 8 speakers, 4612 MiB peak VRAM.
 - Docker image builds (8.14 GB) and runs the full recording: 2m40s, 918
   segments, 8 speakers, 4612 MiB peak.
