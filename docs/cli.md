@@ -116,11 +116,12 @@ or diarization.
 ## report
 
 ```bash
-./scripts/start_llama_server.sh
 meeting-transcriber report data/output/meeting.json \
   --map data/output/meeting.speakers.yaml
-./scripts/stop_llama_server.sh
 ```
+
+The command starts `llama-server` if needed and stops it after the report. If
+the server was started manually, cleanup uses `logs/llama-server.pid`.
 
 | Option | Meaning |
 |---|---|

@@ -307,6 +307,129 @@ def is_server_running(base_url: str = "http://127.0.0.1:8080/v1") -> bool:
     return _health(parsed.hostname or "127.0.0.1", parsed.port or 8080)
 
 
+def _stop_pid(pid: int) -> None:
+    import signal
+
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    for _ in range(30):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return
+        time.sleep(0.5)
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+
+
+def _pid_is_llama(pid: int) -> bool:
+    try:
+        cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().decode("utf-8", "replace")
+    except OSError:
+        return False
+    return "llama" in cmdline.casefold()
+
+
+def _pids_on_port(port: int) -> list[int]:
+    lsof = shutil.which("lsof")
+    if not lsof:
+        return []
+    try:
+        completed = subprocess.run(
+            [lsof, "-ti", f"tcp:{port}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    pids: list[int] = []
+    for line in completed.stdout.splitlines():
+        try:
+            pid = int(line.strip())
+        except ValueError:
+            continue
+        if _pid_is_llama(pid):
+            pids.append(pid)
+    return pids
+
+
+def stop_managed_server(
+    cfg: AppConfig,
+    process: subprocess.Popen | None = None,
+    pid_path: str | Path | None = None,
+) -> bool:
+    """Stop a server started by this tool or by start_llama_server.sh.
+
+    Returns ``True`` when a process was stopped. If no PID file exists, the
+    server is located by its listening port and the process is stopped only when
+    its command line contains ``llama``.
+    """
+
+    target = Path(pid_path).expanduser() if pid_path else cfg.resolve("logs/llama-server.pid")
+    if process is not None and process.poll() is None:
+        stop_server(process)
+        target.unlink(missing_ok=True)
+        return True
+    if target.is_file():
+        try:
+            pid = int(target.read_text(encoding="utf-8").strip())
+        except (OSError, ValueError):
+            target.unlink(missing_ok=True)
+        else:
+            _stop_pid(pid)
+            target.unlink(missing_ok=True)
+            return True
+
+    parsed = urllib.parse.urlparse(cfg.llm.base_url)
+    port = parsed.port or 8080
+    for pid in _pids_on_port(port):
+        _stop_pid(pid)
+        return True
+    return False
+
+
+def start_managed_server(
+    cfg: AppConfig,
+    progress: ProgressFn = _noop,
+    log_path: str | Path | None = None,
+    pid_path: str | Path | None = None,
+) -> subprocess.Popen | None:
+    """Start llama-server unless it is already running.
+
+    ``None`` means an existing server is being reused; ``stop_managed_server``
+    will still try to stop it via the PID file after the report.
+    """
+
+    if is_server_running(cfg.llm.base_url):
+        progress("llama-server уже запущен; будет остановлен после отчёта")
+        return None
+    binary = resolve_llama_binary(cfg)
+    if binary is None:
+        raise LlamaError("llama-server не найден")
+    model = cfg.models_path(
+        "qwen3.5-9b-gguf", "Qwen3.5-9B-UD-Q4_K_XL.gguf"
+    )
+    target_pid = Path(pid_path).expanduser() if pid_path else cfg.resolve("logs/llama-server.pid")
+    process = start_server(
+        binary,
+        model,
+        base_url=cfg.llm.base_url,
+        ctx=cfg.llm.num_ctx,
+        log_path=log_path or cfg.resolve("logs/llama-server.log"),
+        progress=progress,
+    )
+    target_pid.parent.mkdir(parents=True, exist_ok=True)
+    target_pid.write_text(str(process.pid), encoding="utf-8")
+    return process
+
+
+
 def start_server(
     binary: str | Path,
     model_path: str | Path,
@@ -385,6 +508,8 @@ __all__ = [
     "latest_tag",
     "resolve_llama",
     "resolve_llama_binary",
+    "start_managed_server",
     "start_server",
+    "stop_managed_server",
     "stop_server",
 ]

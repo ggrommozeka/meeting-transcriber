@@ -37,10 +37,8 @@ from ..setup.diagnostics import DiagnosticsReport, run_diagnostics
 from ..setup.llama_cpp import (
     LlamaError,
     install_llama,
-    is_server_running,
-    resolve_llama_binary,
-    start_server,
-    stop_server,
+    start_managed_server,
+    stop_managed_server,
 )
 
 SETUP_CSS = """
@@ -360,22 +358,41 @@ class ReportChoice:
     custom_prompt: str | None = None
 
 
-class PromptFilePicker(ModalScreen[Path | None]):
-    """Small file picker for .md/.txt prompt files."""
+class FilePicker(ModalScreen[Path | None]):
+    """Small file/directory picker used by the wizards."""
 
     BINDINGS = [("escape", "cancel", "Отмена")]
 
+    def __init__(
+        self,
+        start: str | Path | None = None,
+        mode: str = "file",
+        title: str = "Выберите файл",
+    ) -> None:
+        super().__init__()
+        start_path = Path(start).expanduser() if start else Path.cwd()
+        self.start = start_path if start_path.is_dir() else start_path.parent
+        self.mode = mode
+        self.title = title
+
     def compose(self) -> ComposeResult:
         with Vertical(id="file-dialog"):
-            yield Label("Выберите файл с промптом", classes="title")
-            yield DirectoryTree(Path.cwd(), id="file-tree")
+            yield Label(self.title, classes="title")
+            yield DirectoryTree(self.start, id="file-tree")
             yield Button("Отмена", id="file-cancel")
 
     def action_cancel(self) -> None:
         self.dismiss(None)
 
     def on_directory_tree_file_selected(self, event: DirectoryTree.FileSelected) -> None:
-        self.dismiss(Path(event.path))
+        if self.mode == "file":
+            self.dismiss(Path(event.path))
+
+    def on_directory_tree_directory_selected(
+        self, event: DirectoryTree.DirectorySelected
+    ) -> None:
+        if self.mode == "directory":
+            self.dismiss(Path(event.path))
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "file-cancel":
@@ -483,7 +500,10 @@ class ReportOptionsScreen(ModalScreen[ReportChoice]):
         if event.button.id == "report-back":
             self.dismiss(None)
         elif event.button.id == "prompt-file":
-            self.app.push_screen(PromptFilePicker(), self._file_picked)
+            self.app.push_screen(
+                FilePicker(title="Выберите файл с промптом"),
+                self._file_picked,
+            )
         elif event.button.id == "report-continue":
             self._continue()
 
@@ -687,20 +707,12 @@ class ProcessApp(BaseWizard):
         cfg.paths.output_dir = str(output)
         server = None
         try:
-            if cfg.llm.enabled and not is_server_running(cfg.llm.base_url):
-                binary = resolve_llama_binary(cfg)
-                if binary is None:
-                    raise LlamaError("LLM-отчёт включён, но llama-server не найден")
-                model = cfg.models_path(
-                    "qwen3.5-9b-gguf", "Qwen3.5-9B-UD-Q4_K_XL.gguf"
-                )
-                server = start_server(
-                    binary,
-                    model,
-                    base_url=cfg.llm.base_url,
-                    ctx=cfg.llm.num_ctx,
-                    log_path=cfg.resolve("logs/llama-server-tui.log"),
+            if cfg.llm.enabled:
+                server = start_managed_server(
+                    cfg,
                     progress=lambda message: self.call_from_thread(self._log, message),
+                    log_path=cfg.resolve("logs/llama-server-tui.log"),
+                    pid_path=cfg.resolve("logs/llama-server.pid"),
                 )
             app = self
             progress = _TuiProgress(app)
@@ -713,9 +725,10 @@ class ProcessApp(BaseWizard):
         except Exception as exc:
             self.call_from_thread(self._log, f"[red]Ошибка:[/red] {exc}")
         finally:
-            if server is not None:
-                stop_server(server)
-                self.call_from_thread(self._log, "llama-server остановлен")
+            if cfg.llm.enabled and stop_managed_server(
+                cfg, server, pid_path=cfg.resolve("logs/llama-server.pid")
+            ):
+                self.call_from_thread(self._log, "llama-server остановлен после отчёта")
 
     def _finish(self, result: RunResult) -> None:
         self.query_one("#bar", ProgressBar).progress = 100
