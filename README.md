@@ -108,6 +108,19 @@ meeting-transcriber transcribe -i meeting.mp4 --visual --llm
 On an 8 GB GPU, run transcription and the LLM server separately: ASR (~4.6 GiB)
 and llama-server (~6.7 GiB) must not compete for VRAM. Video OCR runs on CPU.
 
+Report modes:
+
+```bash
+--report-mode task_discussion   # 1:1 task discussion, C++/architecture focus
+--report-mode status_meeting    # progress updates and new tasks
+--prompt "..."                  # custom instructions for one run
+--prompt-file prompt.md
+```
+
+In `meeting-transcriber process` the mode is selected on a separate screen
+after enabling the LLM report; the custom prompt is entered there and is not
+saved.
+
 ## Outputs
 
 By default, files are written next to the input. With `--output-dir DIR` they go
@@ -155,6 +168,8 @@ llm:
   enabled: true            # used by the `report` command
   base_url: http://127.0.0.1:8080/v1
   model: qwen3.5-9b
+  report_mode: general     # general | task_discussion | status_meeting
+  custom_prompt: null      # one-run override; replaces report_mode
   report_style: asd-ste100 # or plain
 ```
 
@@ -217,7 +232,7 @@ pytest -q
 ruff check src tests
 ```
 
-72 unit/integration tests; `ruff` clean.
+74 unit/integration tests; `ruff` clean.
 
 ## License
 
