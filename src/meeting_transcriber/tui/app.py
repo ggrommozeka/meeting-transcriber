@@ -360,41 +360,22 @@ class ReportChoice:
     custom_prompt: str | None = None
 
 
-class FilePicker(ModalScreen[Path | None]):
-    """Small file/directory picker used by the wizards."""
+class PromptFilePicker(ModalScreen[Path | None]):
+    """Small file picker for .md/.txt prompt files."""
 
     BINDINGS = [("escape", "cancel", "Отмена")]
 
-    def __init__(
-        self,
-        start: str | Path | None = None,
-        mode: str = "file",
-        title: str = "Выберите файл",
-    ) -> None:
-        super().__init__()
-        start_path = Path(start).expanduser() if start else Path.cwd()
-        self.start = start_path if start_path.is_dir() else start_path.parent
-        self.mode = mode
-        self.title = title
-
     def compose(self) -> ComposeResult:
         with Vertical(id="file-dialog"):
-            yield Label(self.title, classes="title")
-            yield DirectoryTree(self.start, id="file-tree")
+            yield Label("Выберите файл с промптом", classes="title")
+            yield DirectoryTree(Path.cwd(), id="file-tree")
             yield Button("Отмена", id="file-cancel")
 
     def action_cancel(self) -> None:
         self.dismiss(None)
 
     def on_directory_tree_file_selected(self, event: DirectoryTree.FileSelected) -> None:
-        if self.mode == "file":
-            self.dismiss(Path(event.path))
-
-    def on_directory_tree_directory_selected(
-        self, event: DirectoryTree.DirectorySelected
-    ) -> None:
-        if self.mode == "directory":
-            self.dismiss(Path(event.path))
+        self.dismiss(Path(event.path))
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "file-cancel":
@@ -502,10 +483,7 @@ class ReportOptionsScreen(ModalScreen[ReportChoice]):
         if event.button.id == "report-back":
             self.dismiss(None)
         elif event.button.id == "prompt-file":
-            self.app.push_screen(
-                FilePicker(title="Выберите файл с промптом"),
-                self._file_picked,
-            )
+            self.app.push_screen(PromptFilePicker(), self._file_picked)
         elif event.button.id == "report-continue":
             self._continue()
 
@@ -773,22 +751,6 @@ class ProcessApp(BaseWizard):
             else:
                 self._report_choice = None
                 self._run_worker()
-
-    def _input_picked(self, path: Path | None) -> None:
-        if path is None:
-            return
-        path = path.expanduser().resolve()
-        self.query_one("#input", Input).value = str(path)
-        output = self.query_one("#output", Input)
-        if not output.value.strip():
-            output.value = str(path.parent)
-        self._validate_worker()
-
-    def _output_picked(self, path: Path | None) -> None:
-        if path is None:
-            return
-        self.query_one("#output", Input).value = str(path.expanduser().resolve())
-        self._validate_worker()
 
     def _report_chosen(self, choice: ReportChoice | None) -> None:
         if choice is None:
