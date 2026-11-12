@@ -79,9 +79,9 @@ will fail with `permission denied` when writing to `work/` or `data/output/`.
 cp "/path/to/recording.webm" data/input/meeting.webm
 
 ./scripts/compose.sh run --rm transcriber transcribe \
-  /data/input/meeting.webm \
+  -i /data/input/meeting.webm \
   --config /app/config/docker.yaml \
-  --skip-llm
+  --output-dir /data/output
 ```
 
 Useful options:
@@ -93,9 +93,9 @@ Useful options:
 --force
 ```
 
-`--skip-llm` is recommended: the LLM report is disabled in the container and
-ASR must not compete with `llama-server` for VRAM. A containerized run of the
-87-minute reference recording took **~2m40s**, found 8 speakers and peaked at
+`transcribe` and `transcribe-video` skip the LLM report. The container has no
+network access, so generate reports natively on the host. A containerized run of
+the 87-minute reference recording took **~2m40s**, found 8 speakers and peaked at
 **4612 MiB**.
 
 Outputs appear on the host:
@@ -159,9 +159,9 @@ tar xzf meeting-transcriber-models.tar.gz
 
 cd /home/demakov/meeting-transcriber
 ./scripts/compose.sh run --rm transcriber transcribe \
-  /data/input/meeting.webm \
+  -i /data/input/meeting.webm \
   --config /app/config/docker.yaml \
-  --skip-llm
+  --output-dir /data/output
 ```
 
 Without the repository, run the image directly:
@@ -176,8 +176,8 @@ docker run --rm --gpus all \
   -v "$PWD/config:/app/config:ro" \
   -e HF_HUB_OFFLINE=1 -e TRANSFORMERS_OFFLINE=1 \
   -e HOME=/tmp -e NUMBA_CACHE_DIR=/tmp/numba -e MPLCONFIGDIR=/tmp/matplotlib \
-  meeting-transcriber:0.1.0 transcribe /data/input/meeting.webm \
-  --config /app/config/docker.yaml --skip-llm
+  meeting-transcriber:0.1.0 transcribe -i /data/input/meeting.webm \
+  --config /app/config/docker.yaml --output-dir /data/output
 ```
 
 ## Update and clean up

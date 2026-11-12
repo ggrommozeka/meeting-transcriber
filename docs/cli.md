@@ -4,6 +4,8 @@
 meeting-transcriber transcribe <audio-or-video> [options]
 meeting-transcriber transcribe -i <audio-or-video> [options]
 meeting-transcriber transcribe-video -i <video> [options]
+meeting-transcriber setup
+meeting-transcriber process [-i <video>] [--output-dir DIR]
 meeting-transcriber extract-audio <media> [options]
 meeting-transcriber speakers <transcript.json> [options]
 meeting-transcriber label-speakers <transcript.json> --map <speakers.yaml>
@@ -28,6 +30,18 @@ transcribe_audio("meeting.mp4")            # no video analysis
 transcribe_video("meeting.mp4")            # OCR of slides/code
 transcribe_video("meeting.mp4", output_dir="out")
 ```
+
+## Interactive wizards
+
+`setup` and `process` open Textual TUI menus. `setup` selects model paths,
+llama.cpp source (`existing`, `release`, `build`), validates the complete
+environment and shows a readiness table with an overall percentage. Choices are
+saved to `config/local.yaml`.
+
+`process` selects the input, output directory and processing options, validates
+only the required components, then runs the pipeline with live stage progress.
+Pass `-i`/`--output-dir` to prefill the menu. Both commands require a terminal;
+for scripts use `transcribe`/`transcribe-video`.
 
 Global options accepted by subcommands that use configuration:
 
