@@ -11,6 +11,8 @@ from .llama_cpp import (
     latest_tag,
     resolve_llama,
     resolve_llama_binary,
+    start_managed_server,
+    stop_managed_server,
 )
 
 __all__ = [
@@ -27,4 +29,6 @@ __all__ = [
     "resolve_llama_binary",
     "run_diagnostics",
     "save_local_settings",
+    "start_managed_server",
+    "stop_managed_server",
 ]

@@ -25,6 +25,11 @@ from .postprocessing.meeting_report import (
     generate_meeting_report,
     render_report_markdown,
 )
+from .setup.llama_cpp import (
+    LlamaError,
+    start_managed_server,
+    stop_managed_server,
+)
 from .speakers import (
     apply_speaker_names,
     collect_speaker_stats,
@@ -471,26 +476,45 @@ def _transcribe(args: argparse.Namespace, cfg: AppConfig) -> int:
         "meeting-transcriber",
         f"[bold]{Path(input_path).name}[/bold] → [muted]{output_dir}[/muted]",
     )
-    with StageProgress(show=err_console.is_terminal) as progress:
-        pipeline = Pipeline(
-            cfg,
-            force=getattr(args, "force", False),
-            skip_diarization=getattr(args, "skip_diarization", False),
-            skip_llm=(
-                not getattr(args, "llm", False)
-                or getattr(args, "skip_llm", False)
-            ),
-            num_speakers=getattr(args, "num_speakers", None),
-            max_speakers=getattr(args, "max_speakers", None),
-            device=getattr(args, "device", None),
-            profile=getattr(args, "profile", None),
-            output_dir=output_dir,
-            speaker_map=(
-                str(args.speaker_map) if getattr(args, "speaker_map", None) else None
-            ),
-            progress=progress,
-        )
-        result = pipeline.run(input_path)
+    llm_enabled = bool(getattr(args, "llm", False)) and not getattr(args, "skip_llm", False)
+    if getattr(args, "llm", False):
+        cfg.llm.enabled = True
+    server = None
+    managed_server = False
+    try:
+        if llm_enabled:
+            try:
+                server = start_managed_server(
+                    cfg,
+                    progress=lambda message: err_console.print(f"[muted]{message}[/muted]"),
+                    log_path=cfg.resolve("logs/llama-server.log"),
+                    pid_path=cfg.resolve("logs/llama-server.pid"),
+                )
+                managed_server = True
+            except LlamaError as exc:
+                raise ConfigError(f"LLM-отчёт: {exc}") from exc
+        with StageProgress(show=err_console.is_terminal) as progress:
+            pipeline = Pipeline(
+                cfg,
+                force=getattr(args, "force", False),
+                skip_diarization=getattr(args, "skip_diarization", False),
+                skip_llm=not llm_enabled,
+                num_speakers=getattr(args, "num_speakers", None),
+                max_speakers=getattr(args, "max_speakers", None),
+                device=getattr(args, "device", None),
+                profile=getattr(args, "profile", None),
+                output_dir=output_dir,
+                speaker_map=(
+                    str(args.speaker_map) if getattr(args, "speaker_map", None) else None
+                ),
+                progress=progress,
+            )
+            result = pipeline.run(input_path)
+    finally:
+        if managed_server and stop_managed_server(
+            cfg, server, pid_path=cfg.resolve("logs/llama-server.pid")
+        ):
+            err_console.print("[muted]llama-server остановлен после отчёта[/muted]")
     transcript = result.transcript
     rows = [
         ("Файл", Path(input_path).name),
@@ -608,15 +632,30 @@ def _report(args: argparse.Namespace, cfg: AppConfig) -> int:
             cards = visual.cards
             if cards:
                 console.print(f"[muted]visual: {len(cards)} cached screen card(s)[/muted]")
-    report, warnings = generate_meeting_report(
-        transcript,
-        cfg.llm,
-        work_dir=work_dir,
-        progress=lambda message: err_console.print(f"[muted]{message}[/muted]"),
-        code_cards=cards,
-        visual_context_chars=cfg.visual.report_context_chars,
-        visual_align_window=cfg.visual.align_window_seconds,
-    )
+    try:
+        server = start_managed_server(
+            cfg,
+            progress=lambda message: err_console.print(f"[muted]{message}[/muted]"),
+            log_path=cfg.resolve("logs/llama-server.log"),
+            pid_path=cfg.resolve("logs/llama-server.pid"),
+        )
+    except LlamaError as exc:
+        raise ConfigError(f"LLM-отчёт: {exc}") from exc
+    try:
+        report, warnings = generate_meeting_report(
+            transcript,
+            cfg.llm,
+            work_dir=work_dir,
+            progress=lambda message: err_console.print(f"[muted]{message}[/muted]"),
+            code_cards=cards,
+            visual_context_chars=cfg.visual.report_context_chars,
+            visual_align_window=cfg.visual.align_window_seconds,
+        )
+    finally:
+        if stop_managed_server(
+            cfg, server, pid_path=cfg.resolve("logs/llama-server.pid")
+        ):
+            err_console.print("[muted]llama-server остановлен после отчёта[/muted]")
     for warning in warnings:
         err_console.print(f"[warn]warning:[/warn] {warning}")
     if report is None:

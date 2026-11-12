@@ -12,13 +12,7 @@ from ..config import AppConfig, ConfigError
 from ..pipeline.runner import Pipeline, RunResult
 from ..setup.config_store import load_local_config
 from ..setup.diagnostics import run_diagnostics
-from ..setup.llama_cpp import (
-    LlamaError,
-    is_server_running,
-    resolve_llama_binary,
-    start_server,
-    stop_server,
-)
+from ..setup.llama_cpp import LlamaError, start_managed_server, stop_managed_server
 from ..ui import StageProgress, banner, console, result_panel
 from .common import (
     STYLE,
@@ -308,20 +302,12 @@ def confirm_and_run(cfg: AppConfig, settings: ProcessSettings) -> int:
 
     server = None
     try:
-        if settings.report and not is_server_running(cfg.llm.base_url):
-            binary = resolve_llama_binary(cfg)
-            if binary is None:
-                raise LlamaError("LLM-отчёт включён, но llama-server не найден")
-            model = cfg.models_path(
-                "qwen3.5-9b-gguf", "Qwen3.5-9B-UD-Q4_K_XL.gguf"
-            )
-            server = start_server(
-                binary,
-                model,
-                base_url=cfg.llm.base_url,
-                ctx=cfg.llm.num_ctx,
-                log_path=cfg.resolve("logs/llama-server-questionary.log"),
+        if settings.report:
+            server = start_managed_server(
+                cfg,
                 progress=lambda message: console.print(f"[muted]{message}[/muted]"),
+                log_path=cfg.resolve("logs/llama-server-questionary.log"),
+                pid_path=cfg.resolve("logs/llama-server.pid"),
             )
         with StageProgress(show=True) as progress:
             result: RunResult = Pipeline(
@@ -346,9 +332,12 @@ def confirm_and_run(cfg: AppConfig, settings: ProcessSettings) -> int:
         console.print(f"[red]{exc}[/red]")
         return 1
     finally:
-        if server is not None:
-            stop_server(server)
-            console.print("[muted]llama-server остановлен[/muted]")
+        if settings.report:
+            stopped = stop_managed_server(
+                cfg, server, pid_path=cfg.resolve("logs/llama-server.pid")
+            )
+            if stopped:
+                console.print("[muted]llama-server остановлен после отчёта[/muted]")
 
 
 def run_process_flow(

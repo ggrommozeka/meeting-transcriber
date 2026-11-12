@@ -90,13 +90,12 @@ When a report is generated, report items link to code cards as
 
 ## LLM report
 
-The report uses a local `llama-server` and is separate from transcription:
+The report uses a local `llama-server`. The tool starts it when needed and
+stops it immediately after the report finishes:
 
 ```bash
 ./scripts/install_llama_cpp.sh          # once
-./scripts/start_llama_server.sh
 meeting-transcriber report /path/to/meeting.json
-./scripts/stop_llama_server.sh
 ```
 
 Or generate it in the same run:
@@ -104,6 +103,10 @@ Or generate it in the same run:
 ```bash
 meeting-transcriber transcribe -i meeting.mp4 --visual --llm
 ```
+
+Both paths stop the server automatically when generation is complete. If the
+server was started manually, its PID file is used for cleanup; a server without
+a PID file is left untouched.
 
 On an 8 GB GPU, run transcription and the LLM server separately: ASR (~4.6 GiB)
 and llama-server (~6.7 GiB) must not compete for VRAM. Video OCR runs on CPU.
@@ -236,7 +239,7 @@ pytest -q
 ruff check src tests
 ```
 
-74 unit/integration tests; `ruff` clean.
+77 unit/integration tests; `ruff` clean.
 
 ## License
 

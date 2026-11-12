@@ -52,3 +52,25 @@ def test_invalid_runtime_source_is_rejected():
         from meeting_transcriber.config import validate_config
 
         validate_config(cfg)
+
+
+def test_stop_managed_server_uses_pid_file(tmp_path):
+    import subprocess
+    import time
+
+    from meeting_transcriber.setup.llama_cpp import stop_managed_server
+
+    process = subprocess.Popen(["sleep", "60"])
+    pid_file = tmp_path / "llama.pid"
+    pid_file.write_text(str(process.pid), encoding="utf-8")
+    try:
+        assert stop_managed_server(load_config(ROOT / "config/default.yaml"), pid_path=pid_file)
+        assert not pid_file.exists()
+        for _ in range(20):
+            if process.poll() is not None:
+                break
+            time.sleep(0.1)
+        assert process.poll() is not None
+    finally:
+        if process.poll() is None:
+            process.kill()
