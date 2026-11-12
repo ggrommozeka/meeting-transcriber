@@ -42,44 +42,47 @@ and English language data.
 source .venv/bin/activate
 ./scripts/download_models.sh        # interactive on a terminal
 ./scripts/verify_models.sh
-
-# Optional: one TUI for paths, llama.cpp, models and validation
-meeting-transcriber setup
 ```
 
-Get a transcript next to the input file:
+## Interactive wizards
+
+Two Textual menus cover the whole lifecycle:
 
 ```bash
-# Audio only: no video analysis, no LLM report
-meeting-transcriber transcribe -i /path/to/meeting.mp4
-
-# Audio + OCR of slides and code shown in the video
-meeting-transcriber transcribe-video -i /path/to/meeting.mp4
+meeting-transcriber setup      # prepare the machine
+meeting-transcriber process    # convert a conversation into a report
 ```
 
-Both commands accept a positional path too, but `-i` is the recommended form:
+### `setup`
+
+A single table-driven wizard:
+
+- choose the model directory, OCR paths and llama.cpp source;
+- `existing` — point to an already built `llama-server`;
+- `release` — download a prebuilt llama.cpp release;
+- `build` — clone the latest stable `b<number>` tag and compile it with CMake;
+- validate Python, FFmpeg, Tesseract, CUDA, llama-server, models and disk;
+- see a summary table with per-component readiness and an overall percentage;
+- download selected model groups and save choices to `config/local.yaml`.
+
+### `process`
+
+One menu for a recording:
+
+- input file and output directory (defaults to the input's directory);
+- language, diarization, speaker count, video OCR, LLM report and report style;
+- validation table only for the features you selected;
+- live stage progress and a log pane;
+- optional automatic start/stop of `llama-server` for the report.
+
+Non-interactive commands remain available for scripts and CI:
 
 ```bash
-meeting-transcriber transcribe /path/to/meeting.mp4   # still supported
+meeting-transcriber transcribe -i meeting.mp4
+meeting-transcriber transcribe-video -i meeting.mp4
 ```
 
-The same two operations are available from Python:
-
-```python
-from meeting_transcriber import transcribe_audio, transcribe_video
-
-result = transcribe_audio("/path/to/meeting.mp4")
-print(result.transcript.meeting_id)
-
-result = transcribe_video(
-    "/path/to/meeting.mp4",
-    output_dir="/path/to/transcripts",   # optional
-)
-```
-
-`transcribe_audio()` and `transcribe_video()` skip the LLM report.
-
-## Control and modes
+## Manual commands
 
 ### 1. Audio-only transcription
 
@@ -162,43 +165,17 @@ meeting-transcriber transcribe -i meeting.mp4 --visual --llm
 On an 8 GB GPU, prefer the two-step workflow: stop `llama-server`, transcribe,
 then start `llama-server` and generate the report.
 
-## Interactive wizards
+## Python API
 
-Two Textual menus cover the whole lifecycle:
+```python
+from meeting_transcriber import transcribe_audio, transcribe_video
 
-```bash
-meeting-transcriber setup      # prepare the machine
-meeting-transcriber process    # convert a conversation into a report
+transcribe_audio("meeting.mp4")            # audio only
+transcribe_video("meeting.mp4")            # audio + screen OCR
+transcribe_video("meeting.mp4", output_dir="out")
 ```
 
-### `setup`
-
-A single table-driven wizard:
-
-- choose the model directory, OCR paths and llama.cpp source;
-- `existing` — point to an already built `llama-server`;
-- `release` — download a prebuilt llama.cpp release;
-- `build` — clone the latest stable `b<number>` tag and compile it with CMake;
-- validate Python, FFmpeg, Tesseract, CUDA, llama-server, models and disk;
-- see a summary table with per-component readiness and an overall percentage;
-- download selected model groups and save choices to `config/local.yaml`.
-
-### `process`
-
-One menu for a recording:
-
-- input file and output directory (defaults to the input's directory);
-- language, diarization, speaker count, video OCR, LLM report and report style;
-- validation table only for the features you selected;
-- live stage progress and a log pane;
-- optional automatic start/stop of `llama-server` for the report.
-
-Non-interactive commands remain available for scripts and CI:
-
-```bash
-meeting-transcriber transcribe -i meeting.mp4
-meeting-transcriber transcribe-video -i meeting.mp4
-```
+Both helpers skip the LLM report. Use `meeting-transcriber report` for that.
 
 ## Setup and models
 
