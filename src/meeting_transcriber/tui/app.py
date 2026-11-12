@@ -360,22 +360,41 @@ class ReportChoice:
     custom_prompt: str | None = None
 
 
-class PromptFilePicker(ModalScreen[Path | None]):
-    """Small file picker for .md/.txt prompt files."""
+class FilePicker(ModalScreen[Path | None]):
+    """Small file/directory picker used by the wizards."""
 
     BINDINGS = [("escape", "cancel", "Отмена")]
 
+    def __init__(
+        self,
+        start: str | Path | None = None,
+        mode: str = "file",
+        title: str = "Выберите файл",
+    ) -> None:
+        super().__init__()
+        start_path = Path(start).expanduser() if start else Path.cwd()
+        self.start = start_path if start_path.is_dir() else start_path.parent
+        self.mode = mode
+        self.title = title
+
     def compose(self) -> ComposeResult:
         with Vertical(id="file-dialog"):
-            yield Label("Выберите файл с промптом", classes="title")
-            yield DirectoryTree(Path.cwd(), id="file-tree")
+            yield Label(self.title, classes="title")
+            yield DirectoryTree(self.start, id="file-tree")
             yield Button("Отмена", id="file-cancel")
 
     def action_cancel(self) -> None:
         self.dismiss(None)
 
     def on_directory_tree_file_selected(self, event: DirectoryTree.FileSelected) -> None:
-        self.dismiss(Path(event.path))
+        if self.mode == "file":
+            self.dismiss(Path(event.path))
+
+    def on_directory_tree_directory_selected(
+        self, event: DirectoryTree.DirectorySelected
+    ) -> None:
+        if self.mode == "directory":
+            self.dismiss(Path(event.path))
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "file-cancel":
@@ -483,7 +502,10 @@ class ReportOptionsScreen(ModalScreen[ReportChoice]):
         if event.button.id == "report-back":
             self.dismiss(None)
         elif event.button.id == "prompt-file":
-            self.app.push_screen(PromptFilePicker(), self._file_picked)
+            self.app.push_screen(
+                FilePicker(title="Выберите файл с промптом"),
+                self._file_picked,
+            )
         elif event.button.id == "report-continue":
             self._continue()
 
@@ -542,9 +564,11 @@ class ProcessApp(BaseWizard):
                 with Horizontal(classes="row"):
                     yield Label("Входной файл", classes="field")
                     yield Input(placeholder="/path/to/meeting.mp4", id="input", classes="wide")
+                    yield Button("Выбрать…", id="input-pick")
                 with Horizontal(classes="row"):
                     yield Label("Выходная папка", classes="field")
                     yield Input(placeholder="по умолчанию рядом с файлом", id="output", classes="wide")
+                    yield Button("Выбрать…", id="output-pick")
                 with Horizontal(classes="row"):
                     yield Label("Язык", classes="field")
                     yield Input(value="ru", id="language", classes="wide")
@@ -643,7 +667,7 @@ class ProcessApp(BaseWizard):
             )
             extra = []
             if source is None:
-                extra.append(("Входной файл", "fail", 0, "не выбран"))
+                extra.append(("Входной файл", "warn", 0, "нажмите «Выбрать…»"))
             elif not source.is_file():
                 extra.append(("Входной файл", "fail", 0, f"не найден: {source}"))
             else:
@@ -723,7 +747,25 @@ class ProcessApp(BaseWizard):
             self._log(f"{name}: {path}")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "validate":
+        if event.button.id == "input-pick":
+            self.push_screen(
+                FilePicker(
+                    start=self.query_one("#input", Input).value or Path.cwd(),
+                    mode="file",
+                    title="Выберите видео или аудио",
+                ),
+                self._input_picked,
+            )
+        elif event.button.id == "output-pick":
+            self.push_screen(
+                FilePicker(
+                    start=self.query_one("#output", Input).value or Path.cwd(),
+                    mode="directory",
+                    title="Выберите выходную папку",
+                ),
+                self._output_picked,
+            )
+        elif event.button.id == "validate":
             self._validate_worker()
         elif event.button.id == "run":
             if self.query_one("#report", Switch).value:
@@ -731,6 +773,22 @@ class ProcessApp(BaseWizard):
             else:
                 self._report_choice = None
                 self._run_worker()
+
+    def _input_picked(self, path: Path | None) -> None:
+        if path is None:
+            return
+        path = path.expanduser().resolve()
+        self.query_one("#input", Input).value = str(path)
+        output = self.query_one("#output", Input)
+        if not output.value.strip():
+            output.value = str(path.parent)
+        self._validate_worker()
+
+    def _output_picked(self, path: Path | None) -> None:
+        if path is None:
+            return
+        self.query_one("#output", Input).value = str(path.expanduser().resolve())
+        self._validate_worker()
 
     def _report_chosen(self, choice: ReportChoice | None) -> None:
         if choice is None:
