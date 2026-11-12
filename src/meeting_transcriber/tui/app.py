@@ -542,9 +542,11 @@ class ProcessApp(BaseWizard):
                 with Horizontal(classes="row"):
                     yield Label("Входной файл", classes="field")
                     yield Input(placeholder="/path/to/meeting.mp4", id="input", classes="wide")
+                    yield Button("Выбрать…", id="input-pick")
                 with Horizontal(classes="row"):
                     yield Label("Выходная папка", classes="field")
                     yield Input(placeholder="по умолчанию рядом с файлом", id="output", classes="wide")
+                    yield Button("Выбрать…", id="output-pick")
                 with Horizontal(classes="row"):
                     yield Label("Язык", classes="field")
                     yield Input(value="ru", id="language", classes="wide")
@@ -643,7 +645,7 @@ class ProcessApp(BaseWizard):
             )
             extra = []
             if source is None:
-                extra.append(("Входной файл", "fail", 0, "не выбран"))
+                extra.append(("Входной файл", "warn", 0, "нажмите «Выбрать…»"))
             elif not source.is_file():
                 extra.append(("Входной файл", "fail", 0, f"не найден: {source}"))
             else:
@@ -723,7 +725,25 @@ class ProcessApp(BaseWizard):
             self._log(f"{name}: {path}")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "validate":
+        if event.button.id == "input-pick":
+            self.push_screen(
+                FilePicker(
+                    start=self.query_one("#input", Input).value or Path.cwd(),
+                    mode="file",
+                    title="Выберите видео или аудио",
+                ),
+                self._input_picked,
+            )
+        elif event.button.id == "output-pick":
+            self.push_screen(
+                FilePicker(
+                    start=self.query_one("#output", Input).value or Path.cwd(),
+                    mode="directory",
+                    title="Выберите выходную папку",
+                ),
+                self._output_picked,
+            )
+        elif event.button.id == "validate":
             self._validate_worker()
         elif event.button.id == "run":
             if self.query_one("#report", Switch).value:

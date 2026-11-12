@@ -16,7 +16,7 @@ source .venv/bin/activate
 ./scripts/verify_models.sh
 ```
 
-Get a transcript next to the input file:
+## Interactive wizards
 
 ```bash
 meeting-transcriber transcribe -i /path/to/meeting.mp4
@@ -175,6 +175,10 @@ llm:
 
 Local machine-specific settings from `setup` live in `config/local.yaml`
 (gitignored).
+
+Report focus can be changed per run with `--report-mode task_discussion` or
+`--report-mode status_meeting`, or with a one-off `--prompt` / `--prompt-file`.
+The `process` wizard asks for this on a separate screen before starting.
 
 ## Docker
 
