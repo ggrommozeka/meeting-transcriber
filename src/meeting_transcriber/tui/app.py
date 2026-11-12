@@ -37,8 +37,7 @@ from ..setup.diagnostics import DiagnosticsReport, run_diagnostics
 from ..setup.llama_cpp import (
     LlamaError,
     install_llama,
-    start_managed_server,
-    stop_managed_server,
+    managed_llama_server,
 )
 
 SETUP_CSS = """
@@ -705,30 +704,27 @@ class ProcessApp(BaseWizard):
             return
         assert output is not None
         cfg.paths.output_dir = str(output)
-        server = None
+
+        def report_server():
+            return managed_llama_server(
+                cfg,
+                progress=lambda message: self.call_from_thread(self._log, message),
+                log_path=cfg.resolve("logs/llama-server-tui.log"),
+                pid_path=cfg.resolve("logs/llama-server.pid"),
+            )
+
         try:
-            if cfg.llm.enabled:
-                server = start_managed_server(
-                    cfg,
-                    progress=lambda message: self.call_from_thread(self._log, message),
-                    log_path=cfg.resolve("logs/llama-server-tui.log"),
-                    pid_path=cfg.resolve("logs/llama-server.pid"),
-                )
             app = self
             progress = _TuiProgress(app)
             result = Pipeline(
                 cfg,
                 skip_llm=not cfg.llm.enabled,
                 progress=progress,
+                report_server=report_server if cfg.llm.enabled else None,
             ).run(source)
             self.call_from_thread(self._finish, result)
         except Exception as exc:
             self.call_from_thread(self._log, f"[red]Ошибка:[/red] {exc}")
-        finally:
-            if cfg.llm.enabled and stop_managed_server(
-                cfg, server, pid_path=cfg.resolve("logs/llama-server.pid")
-            ):
-                self.call_from_thread(self._log, "llama-server остановлен после отчёта")
 
     def _finish(self, result: RunResult) -> None:
         self.query_one("#bar", ProgressBar).progress = 100

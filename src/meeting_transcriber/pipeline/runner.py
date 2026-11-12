@@ -8,7 +8,7 @@ import platform
 import re
 import shutil
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -65,12 +65,14 @@ class Pipeline:
         output_dir: str | None = None,
         speaker_map: str | None = None,
         progress: Any | None = None,
+        report_server: Any | None = None,
     ) -> None:
         self.cfg = cfg
         self.force = force
         self.progress = progress
         self.skip_diarization = skip_diarization
         self.skip_llm = skip_llm
+        self.report_server = report_server
         self.speaker_map_path = Path(speaker_map).expanduser() if speaker_map else None
         self.speaker_map = (
             load_speaker_map(self.speaker_map_path) if self.speaker_map_path else {}
@@ -150,6 +152,10 @@ class Pipeline:
         warnings.extend(visual.warnings)
 
         # 3. ASR -----------------------------------------------------------
+        # A llama-server left over from a previous run occupies most of the
+        # VRAM on 8 GB GPUs. Stop it before whisper tries to load.
+        if self._stop_stale_llm_server():
+            warnings.append("llama-server was stopped before ASR to free VRAM")
         started = time.perf_counter()
         _reset_peak()
         with self._stage_progress("asr", "Распознавание речи"):
@@ -587,6 +593,21 @@ class Pipeline:
         state_mod.mark_done(state, "terminology", artifact, fingerprint)
         return warnings
 
+    def _stop_stale_llm_server(self) -> bool:
+        """Stop a llama-server that would compete with ASR for VRAM."""
+
+        from ..setup.llama_cpp import is_server_running, stop_managed_server
+
+        if not is_server_running(self.cfg.llm.base_url):
+            return False
+        pid_path = self.cfg.resolve("logs/llama-server.pid")
+        if not stop_managed_server(self.cfg, pid_path=pid_path):
+            raise PipelineError(
+                "llama-server is still running and would cause CUDA OOM; "
+                "stop it with scripts/stop_llama_server.sh or use --skip-llm"
+            )
+        return True
+
     def _stage_report(
         self,
         transcript: Transcript,
@@ -602,14 +623,18 @@ class Pipeline:
             state, "llm_report", artifact, fingerprint
         ):
             return json.loads(artifact.read_text(encoding="utf-8")), []
-        report, warnings = generate_meeting_report(
-            transcript,
-            self.cfg.llm,
-            work_dir=work_dir,
-            code_cards=cards,
-            visual_context_chars=self.cfg.visual.report_context_chars,
-            visual_align_window=self.cfg.visual.align_window_seconds,
-        )
+        # Start llama-server only now, after ASR and diarization released
+        # their models. Otherwise the 9B model competes with whisper for VRAM.
+        manager = self.report_server() if self.report_server is not None else nullcontext()
+        with manager:
+            report, warnings = generate_meeting_report(
+                transcript,
+                self.cfg.llm,
+                work_dir=work_dir,
+                code_cards=cards,
+                visual_context_chars=self.cfg.visual.report_context_chars,
+                visual_align_window=self.cfg.visual.align_window_seconds,
+            )
         if report is not None:
             artifact.write_text(
                 json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"

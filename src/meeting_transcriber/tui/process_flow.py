@@ -12,7 +12,7 @@ from ..config import AppConfig, ConfigError
 from ..pipeline.runner import Pipeline, RunResult
 from ..setup.config_store import load_local_config
 from ..setup.diagnostics import run_diagnostics
-from ..setup.llama_cpp import LlamaError, start_managed_server, stop_managed_server
+from ..setup.llama_cpp import LlamaError, managed_llama_server
 from ..ui import StageProgress, banner, console, result_panel
 from .common import (
     STYLE,
@@ -300,20 +300,21 @@ def confirm_and_run(cfg: AppConfig, settings: ProcessSettings) -> int:
     if action != "run":
         return 0 if action == "cancel" else -1
 
-    server = None
+    def report_server():
+        return managed_llama_server(
+            cfg,
+            progress=lambda message: console.print(f"[muted]{message}[/muted]"),
+            log_path=cfg.resolve("logs/llama-server-questionary.log"),
+            pid_path=cfg.resolve("logs/llama-server.pid"),
+        )
+
     try:
-        if settings.report:
-            server = start_managed_server(
-                cfg,
-                progress=lambda message: console.print(f"[muted]{message}[/muted]"),
-                log_path=cfg.resolve("logs/llama-server-questionary.log"),
-                pid_path=cfg.resolve("logs/llama-server.pid"),
-            )
         with StageProgress(show=True) as progress:
             result: RunResult = Pipeline(
                 cfg,
                 skip_llm=not settings.report,
                 progress=progress,
+                report_server=report_server if settings.report else None,
             ).run(settings.input_path)
         console.print()
         result_panel(
@@ -331,13 +332,6 @@ def confirm_and_run(cfg: AppConfig, settings: ProcessSettings) -> int:
     except (LlamaError, ConfigError) as exc:
         console.print(f"[red]{exc}[/red]")
         return 1
-    finally:
-        if settings.report:
-            stopped = stop_managed_server(
-                cfg, server, pid_path=cfg.resolve("logs/llama-server.pid")
-            )
-            if stopped:
-                console.print("[muted]llama-server остановлен после отчёта[/muted]")
 
 
 def run_process_flow(

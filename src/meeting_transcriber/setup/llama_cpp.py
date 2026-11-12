@@ -12,7 +12,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from ..config import AppConfig
@@ -394,6 +395,29 @@ def stop_managed_server(
     return False
 
 
+@contextmanager
+def managed_llama_server(
+    cfg: AppConfig,
+    progress: ProgressFn = _noop,
+    log_path: str | Path | None = None,
+    pid_path: str | Path | None = None,
+) -> Iterator[subprocess.Popen | None]:
+    """Run llama-server only for the duration of the context block.
+
+    Load the LLM after ASR and diarization have released their VRAM. Starting
+    the 9B model before whisper is what caused CUDA OOM on 8 GB GPUs.
+    """
+
+    process = start_managed_server(
+        cfg, progress=progress, log_path=log_path, pid_path=pid_path
+    )
+    try:
+        yield process
+    finally:
+        if stop_managed_server(cfg, process, pid_path=pid_path):
+            progress("llama-server остановлен")
+
+
 def start_managed_server(
     cfg: AppConfig,
     progress: ProgressFn = _noop,
@@ -506,6 +530,7 @@ __all__ = [
     "install_llama",
     "is_server_running",
     "latest_tag",
+    "managed_llama_server",
     "resolve_llama",
     "resolve_llama_binary",
     "start_managed_server",

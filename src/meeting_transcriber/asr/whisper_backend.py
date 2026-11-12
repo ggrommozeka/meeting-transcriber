@@ -83,6 +83,11 @@ class WhisperBackend(Transcriber):
                     " Check that the NVIDIA driver, CUDA libraries and the "
                     "faster-whisper/ctranslate2 build are compatible, or retry with --device cpu."
                 )
+                if "out of memory" in str(exc).lower():
+                    hint += (
+                        " GPU VRAM is exhausted: stop llama-server"
+                        " (scripts/stop_llama_server.sh) or run with --skip-llm."
+                    )
             raise BackendUnavailableError(
                 f"failed to load faster-whisper model from {self.model_dir}: {exc}.{hint}"
             ) from exc

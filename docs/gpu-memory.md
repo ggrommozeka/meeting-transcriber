@@ -49,7 +49,11 @@ larger of the two stages.
 The optional LLM report (unsloth Qwen3.5-9B UD-Q4_K_XL via llama.cpp) took
 5m48s for the 20-chunk map pass; consolidating topics and generating the summary
 from cached chunks took 2m21s. `llama-server` holds about 6.7 GiB with an 8k
-context, so stop it (`scripts/stop_llama_server.sh`) before the next ASR run.
+context, so it must not be loaded while whisper is running. The pipeline now
+starts it lazily for the report stage, after ASR and diarization have released
+their models, and stops it when the report finishes. A server left over from a
+previous run is stopped automatically before ASR; `scripts/stop_llama_server.sh`
+remains available for manual cleanup.
 
 ## If you hit OOM
 
