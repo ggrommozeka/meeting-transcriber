@@ -1,3 +1,5 @@
 PyYAML>=6.0,<7
 numpy>=1.26,<3
 requests>=2.31,<3
+Pillow>=10,<14
+rich>=13,<15

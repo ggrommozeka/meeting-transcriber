@@ -18,6 +18,10 @@ asr:
 diarization:
   device: cuda
 
+visual:
+  enabled: false
+  backend: tesseract
+
 llm:
   # Compose runs with network_mode: "none"; enable this only if the container
   # can reach a host llama-server (e.g. a bridge network).

@@ -81,6 +81,29 @@ terminology:
   max_ngram: 5
   ambiguous_margin: 0.04
 
+# Optional video analysis: OCR slides and code shown on screen. Disabled by
+# default; enable per run with --visual or set visual.enabled: true.
+# Requires the tesseract executable (CPU-only, offline with local traineddata).
+visual:
+  enabled: false
+  backend: tesseract
+  tesseract: tesseract
+  languages: [rus, eng]
+  # Directory with <lang>.traineddata; empty means the system tessdata path.
+  tessdata_dir: null
+  frame_interval_seconds: 4
+  scene_threshold: 0.30
+  dedupe_distance: 6
+  min_text_chars: 20
+  # OCR crop: left, top, right, bottom (fractions). Removes browser/IDE chrome.
+  crop: [0.22, 0.09, 0.90, 0.95]
+  keep_code_frames: true
+  max_frames: 800
+  max_cards: 120
+  report_context_chars: 1200
+  align_window_seconds: 30
+  ocr_timeout_seconds: 60
+
 llm:
   enabled: true
   # llama.cpp server (scripts/start_llama_server.sh)

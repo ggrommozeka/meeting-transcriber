@@ -23,6 +23,8 @@ from ..config import LLMConfig
 from ..errors import PipelineError
 from ..speakers import collect_speaker_stats, speaker_label, speaker_labels
 from ..types import Segment, Transcript
+from ..visual.context import build_visual_context
+from ..visual.types import CodeCard
 from .llm_client import LLMClient
 
 SYSTEM_PROMPT = """Ты — ассистент протоколирования совещаний. Тебе дан фрагмент транскрипта с идентификаторами сегментов.
@@ -34,24 +36,26 @@ SYSTEM_PROMPT = """Ты — ассистент протоколирования 
 5. "topics" — 2–4 крупные темы фрагмента, а не по одной теме на реплику.
 6. Если данных недостаточно, укажи это в "uncertain" и поставь confidence ниже 0.6.
 7. Не переписывай речи и не меняй их смысл.
-8. Верни только валидный JSON без markdown-ограждений.
+8. Если в запросе есть блок «На экране», это вспомогательный OCR-контекст. Используй его только для точных имён классов, функций, файлов и терминов. Не выдумывай содержимое экрана.
+9. Поле "code_refs" заполняй идентификаторами карточек (C1, C2, ...), только если утверждение связано с показанным на экране. Идентификаторы бери только из блока «На экране».
+10. Верни только валидный JSON без markdown-ограждений.
 
 Схема ответа:
 {
-  "topics": [{"title": "строка", "summary": "строка", "segment_refs": ["S1"]}],
-  "decisions": [{"text": "строка", "segment_refs": ["S1"], "confidence": 0.0}],
-  "action_items": [{"task": "строка", "owner": null, "due": null, "segment_refs": ["S1"], "confidence": 0.0}],
-  "risks": [{"text": "строка", "segment_refs": ["S1"]}],
-  "open_questions": [{"text": "строка", "segment_refs": ["S1"]}],
-  "uncertain": [{"text": "строка", "segment_refs": ["S1"]}]
+  "topics": [{"title": "строка", "summary": "строка", "segment_refs": ["S1"], "code_refs": ["C1"]}],
+  "decisions": [{"text": "строка", "segment_refs": ["S1"], "code_refs": ["C1"], "confidence": 0.0}],
+  "action_items": [{"task": "строка", "owner": null, "due": null, "segment_refs": ["S1"], "code_refs": ["C1"], "confidence": 0.0}],
+  "risks": [{"text": "строка", "segment_refs": ["S1"], "code_refs": ["C1"]}],
+  "open_questions": [{"text": "строка", "segment_refs": ["S1"], "code_refs": ["C1"]}],
+  "uncertain": [{"text": "строка", "segment_refs": ["S1"], "code_refs": ["C1"]}]
 }"""
 
 CONSOLIDATE_SYSTEM_PROMPT = """Ты — редактор протокола совещания. Тебе дан список тем, извлечённых из последовательных частей одного транскрипта.
 Строгие правила:
 1. Объедини близкие темы в крупные смысловые блоки. Не создавай больше тем, чем указано в запросе.
 2. Не добавляй фактов, которых нет в исходных темах. Не придумывай имена, сроки и решения.
-3. Для каждой темы объедини все ссылки на сегменты (segment_refs) из исходных тем. Не теряй ссылки.
-4. Верни только валидный JSON: {"topics": [{"title": "строка", "summary": "строка", "segment_refs": ["S1"]}]}"""
+3. Для каждой темы объедини все ссылки на сегменты (segment_refs) и карточки экрана (code_refs) из исходных тем. Не теряй ссылки.
+4. Верни только валидный JSON: {"topics": [{"title": "строка", "summary": "строка", "segment_refs": ["S1"], "code_refs": ["C1"]}]}"""
 
 SUMMARY_SYSTEM_PROMPT = """Ты — редактор протокола совещания. Тебе дан список тем, решений, задач, рисков и вопросов, извлечённых из транскрипта.
 Строгие правила:
@@ -146,6 +150,7 @@ def transcript_prompt(
     selected: list[tuple[int, Segment]] | None = None,
     max_chars: int = 120_000,
     use_names: bool = True,
+    visual_context: str | None = None,
 ) -> str:
     labels = speaker_labels(transcript)
     lines = [
@@ -162,6 +167,8 @@ def transcript_prompt(
             break
         lines.append(line)
         used += len(line)
+    if visual_context:
+        lines += ["", "На экране (OCR, может содержать ошибки):", visual_context]
     return "\n".join(lines)
 
 
@@ -233,15 +240,18 @@ def _as_float(value: Any, default: float = 0.5) -> float:
 
 
 def _sanitize_report(
-    report: dict[str, Any], valid: set[str]
+    report: dict[str, Any],
+    valid: set[str],
+    valid_codes: set[str] | None = None,
 ) -> tuple[dict[str, Any], int]:
     dropped = 0
+    valid_codes = valid_codes or set()
 
-    def refs(value: Any) -> list[str]:
+    def refs(value: Any, allowed: set[str]) -> list[str]:
         nonlocal dropped
         if not isinstance(value, list):
             return []
-        kept = [str(v) for v in value if str(v) in valid]
+        kept = [str(v) for v in value if str(v) in allowed]
         dropped += len(value) - len(kept)
         return kept
 
@@ -264,7 +274,8 @@ def _sanitize_report(
                 {
                     "title": text(item.get("title")),
                     "summary": text(item.get("summary")),
-                    "segment_refs": refs(item.get("segment_refs")),
+                    "segment_refs": refs(item.get("segment_refs"), valid),
+                    "code_refs": refs(item.get("code_refs"), valid_codes),
                 }
             )
     for item in report.get("decisions") or []:
@@ -272,7 +283,8 @@ def _sanitize_report(
             cleaned["decisions"].append(
                 {
                     "text": text(item.get("text")),
-                    "segment_refs": refs(item.get("segment_refs")),
+                    "segment_refs": refs(item.get("segment_refs"), valid),
+                    "code_refs": refs(item.get("code_refs"), valid_codes),
                     "confidence": _as_float(item.get("confidence")),
                 }
             )
@@ -282,7 +294,8 @@ def _sanitize_report(
                 cleaned[key].append(
                     {
                         "text": text(item.get("text")),
-                        "segment_refs": refs(item.get("segment_refs")),
+                        "segment_refs": refs(item.get("segment_refs"), valid),
+                        "code_refs": refs(item.get("code_refs"), valid_codes),
                     }
                 )
     for item in report.get("action_items") or []:
@@ -292,7 +305,8 @@ def _sanitize_report(
                     "task": text(item.get("task")),
                     "owner": item.get("owner"),
                     "due": item.get("due"),
-                    "segment_refs": refs(item.get("segment_refs")),
+                    "segment_refs": refs(item.get("segment_refs"), valid),
+                    "code_refs": refs(item.get("code_refs"), valid_codes),
                     "confidence": _as_float(item.get("confidence")),
                 }
             )
@@ -342,6 +356,10 @@ def _dedupe_items(
             result[duplicate_index]["segment_refs"] = _merge_refs(
                 list(result[duplicate_index].get("segment_refs") or []),
                 list(item.get("segment_refs") or []),
+            )
+            result[duplicate_index]["code_refs"] = _merge_refs(
+                list(result[duplicate_index].get("code_refs") or []),
+                list(item.get("code_refs") or []),
             )
     return result
 
@@ -398,6 +416,7 @@ def _consolidate_group(
     limit: int,
     cfg: LLMConfig,
     valid: set[str],
+    valid_codes: set[str],
     previous_count: int | None = None,
 ) -> list[dict[str, Any]] | None:
     payload = [
@@ -405,6 +424,7 @@ def _consolidate_group(
             "title": item.get("title"),
             "summary": item.get("summary"),
             "segment_refs": item.get("segment_refs"),
+            "code_refs": item.get("code_refs"),
         }
         for item in topics
     ]
@@ -420,7 +440,7 @@ def _consolidate_group(
     )
     if data is None or not isinstance(data.get("topics"), list):
         return None
-    sanitized, _ = _sanitize_report({"topics": data["topics"]}, valid)
+    sanitized, _ = _sanitize_report({"topics": data["topics"]}, valid, valid_codes)
     return sanitized.get("topics") or None
 
 
@@ -434,8 +454,10 @@ def _merge_excess(topics: list[dict[str, Any]], limit: int) -> list[dict[str, An
     if not rest:
         return keep
     refs: list[str] = []
+    code_refs: list[str] = []
     for item in rest:
         refs.extend(item.get("segment_refs") or [])
+        code_refs.extend(item.get("code_refs") or [])
     titles = [str(item.get("title") or "").strip() for item in rest]
     summary = "Также обсуждались: " + "; ".join(title for title in titles if title)
     keep.append(
@@ -443,6 +465,7 @@ def _merge_excess(topics: list[dict[str, Any]], limit: int) -> list[dict[str, An
             "title": "Прочие темы",
             "summary": summary[:4000],
             "segment_refs": sorted(set(refs), key=lambda value: int(value[1:]) if value[1:].isdigit() else 10**9),
+            "code_refs": _merge_refs([], code_refs),
         }
     )
     return keep
@@ -453,6 +476,7 @@ def _consolidate_topics(
     report: dict[str, Any],
     cfg: LLMConfig,
     valid: set[str],
+    valid_codes: set[str],
 ) -> list[str]:
     """Merge granular topics into the profile's target without exceeding context.
 
@@ -475,10 +499,10 @@ def _consolidate_topics(
         for group in groups:
             share = max(1, round(target * len(group) / len(topics)))
             limit = max(1, min(target, share))
-            merged = _consolidate_group(client, group, limit, cfg, valid)
+            merged = _consolidate_group(client, group, limit, cfg, valid, valid_codes)
             if merged is not None and len(merged) > limit:
                 retried = _consolidate_group(
-                    client, group, limit, cfg, valid, previous_count=len(merged)
+                    client, group, limit, cfg, valid, valid_codes, previous_count=len(merged)
                 )
                 if retried is not None:
                     merged = retried
@@ -543,6 +567,42 @@ def _synthesize_summary(
         report["title"] = title
     if summary:
         report["summary"] = summary
+
+
+def _fill_code_refs_by_time(
+    report: dict[str, Any],
+    transcript: Transcript,
+    cards: list[CodeCard],
+    padding: float,
+) -> None:
+    """Attach visual cards to items that the LLM did not reference explicitly.
+
+    The fallback is deterministic: it uses only the time range of the item's
+    segment references. It prevents useful screen material from being lost when
+    the model omits ``code_refs``.
+    """
+
+    if not cards:
+        return
+    segments = {f"S{index}": segment for index, segment in enumerate(transcript.segments, start=1)}
+    for key in ("decisions", "action_items", "risks", "open_questions", "uncertain"):
+        for item in report.get(key) or []:
+            if item.get("code_refs"):
+                continue
+            refs = [segments[ref] for ref in item.get("segment_refs") or [] if ref in segments]
+            if not refs:
+                continue
+            start = min(segment.start for segment in refs)
+            end = max(segment.end for segment in refs)
+            matches = [
+                card
+                for card in cards
+                if card.kind in {"code", "slide"}
+                and card.start <= end + padding
+                and card.end >= start - padding
+            ]
+            if matches:
+                item["code_refs"] = [card.code_id for card in matches[:2]]
 
 
 def _humanize_speaker_ids(report: dict[str, Any], transcript: Transcript) -> None:
@@ -631,6 +691,9 @@ def generate_meeting_report(
     client: LLMClient | None = None,
     work_dir: str | Path | None = None,
     progress: ProgressFn | None = None,
+    code_cards: list[CodeCard] | None = None,
+    visual_context_chars: int = 1200,
+    visual_align_window: float = 30.0,
 ) -> tuple[dict[str, Any] | None, list[str]]:
     warnings: list[str] = []
     if not cfg.enabled:
@@ -638,19 +701,29 @@ def generate_meeting_report(
     if not transcript.segments:
         return None, ["meeting report skipped: transcript has no segments"]
 
+    code_cards = code_cards or []
     client = client or LLMClient(cfg)
     chunks = chunk_segments(transcript, cfg.chunk_chars)
     if not chunks:
         return None, ["meeting report skipped: nothing to summarise"]
 
     valid = {f"S{i}" for i in range(1, len(transcript.segments) + 1)}
+    valid_codes = {card.code_id for card in code_cards}
+    visual_fingerprint = hashlib.sha256(
+        json.dumps(
+            [card.to_dict() for card in code_cards],
+            sort_keys=True,
+            ensure_ascii=False,
+        ).encode("utf-8")
+    ).hexdigest()[:12]
     if work_dir:
         key = hashlib.sha256(
             json.dumps(
                 {
                     "model": cfg.model,
                     "chunk_chars": cfg.chunk_chars,
-                    "prompt": "ids-v1",
+                    "prompt": "ids-v2-visual",
+                    "visual": visual_fingerprint,
                 },
                 sort_keys=True,
                 ensure_ascii=False,
@@ -671,6 +744,15 @@ def generate_meeting_report(
             if cache_path and cache_path.is_file():
                 payload = _parse_json(cache_path.read_text(encoding="utf-8"))
             if payload is None:
+                chunk_start = min(segment.start for _, segment in chunk)
+                chunk_end = max(segment.end for _, segment in chunk)
+                visual_context = build_visual_context(
+                    code_cards,
+                    chunk_start,
+                    chunk_end,
+                    visual_context_chars,
+                    padding=visual_align_window,
+                )
                 payload = _chat_json(
                     client,
                     _with_style(SYSTEM_PROMPT, cfg),
@@ -679,6 +761,7 @@ def generate_meeting_report(
                         selected=chunk,
                         max_chars=cfg.chunk_chars,
                         use_names=False,
+                        visual_context=visual_context,
                     ),
                     cfg.retries,
                 )
@@ -692,7 +775,7 @@ def generate_meeting_report(
                     f"meeting report: chunk {number} skipped (invalid JSON after retries)"
                 )
                 continue
-            sanitized, dropped = _sanitize_report(payload, valid)
+            sanitized, dropped = _sanitize_report(payload, valid, valid_codes)
             if dropped:
                 warnings.append(
                     f"meeting report: chunk {number} dropped {dropped} unknown reference(s)"
@@ -707,13 +790,17 @@ def generate_meeting_report(
         merged = _aggregate_parts(parts)
         if progress:
             progress("LLM report: consolidating topics")
-        warnings.extend(_consolidate_topics(client, merged, cfg, valid))
+        warnings.extend(_consolidate_topics(client, merged, cfg, valid, valid_codes))
         _add_participants(merged, transcript)
+        merged["code_cards"] = [card.to_dict() for card in code_cards]
         if progress:
             progress("LLM report: title and summary")
         _synthesize_summary(client, merged, cfg, speaker_labels(transcript))
         _humanize_speaker_ids(merged, transcript)
         _limit_report(merged, cfg)
+        _fill_code_refs_by_time(
+            merged, transcript, code_cards, visual_align_window
+        )
 
         if not merged.get("title") or merged["title"] == "Протокол совещания":
             merged["title"] = f"Протокол совещания: {transcript.meeting_id}"
@@ -746,7 +833,46 @@ def _format_refs(refs: list[str], max_ranges: int = 8) -> str:
     return ", ".join(ranges)
 
 
-def render_report_markdown(report: dict[str, Any]) -> str:
+def _format_code_refs(refs: list[str], cards: dict[str, dict[str, Any]], max_items: int = 8) -> str:
+    parts: list[str] = []
+    for ref in refs:
+        if not re.fullmatch(r"C\d+", ref):
+            continue
+        card = cards.get(ref)
+        if card and card.get("start") is not None:
+            parts.append(f"{ref} ({_timestamp(float(card['start']))})")
+        else:
+            parts.append(ref)
+    if len(parts) > max_items:
+        parts = parts[:max_items] + ["…"]
+    return ", ".join(parts)
+
+
+def _card_index(report: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {
+        str(card.get("code_id")): card
+        for card in report.get("code_cards") or []
+        if isinstance(card, dict) and card.get("code_id")
+    }
+
+
+def _source_suffix(item: dict[str, Any], cards: dict[str, dict[str, Any]]) -> str:
+    parts: list[str] = []
+    segment_refs = item.get("segment_refs") or []
+    if segment_refs:
+        parts.append(_format_refs(segment_refs))
+    code_refs = item.get("code_refs") or []
+    if code_refs:
+        rendered = _format_code_refs(code_refs, cards)
+        if rendered:
+            parts.append(f"код: {rendered}")
+    return "; ".join(part for part in parts if part)
+
+
+def render_report_markdown(
+    report: dict[str, Any], frames_dir: str | None = None
+) -> str:
+    cards = _card_index(report)
     lines = [f"# {report.get('title', 'Протокол совещания')}", ""]
     participants = report.get("participants") or []
     if participants:
@@ -766,8 +892,9 @@ def render_report_markdown(report: dict[str, Any]) -> str:
         for topic in report["topics"]:
             lines.append(f"### {topic.get('title') or 'Без названия'}")
             lines.append(topic.get("summary") or "")
-            if topic.get("segment_refs"):
-                lines.append(f"Источники: {_format_refs(topic['segment_refs'])}")
+            sources = _source_suffix(topic, cards)
+            if sources:
+                lines.append(f"Источники: {sources}")
             lines.append("")
     for key, title in (
         ("decisions", "Решения"),
@@ -792,14 +919,36 @@ def render_report_markdown(report: dict[str, Any]) -> str:
                     text += f" ({'; '.join(extras)})"
             else:
                 text = item.get("text") or ""
-            suffix = (
-                f" — {_format_refs(item.get('segment_refs') or [])}"
-                if item.get("segment_refs")
-                else ""
-            )
+            sources = _source_suffix(item, cards)
+            suffix = f" — {sources}" if sources else ""
             confidence = item.get("confidence")
             if confidence is not None and confidence < 0.6:
                 suffix += " (низкая уверенность)"
             lines.append(f"- {text}{suffix}")
         lines.append("")
+
+    shown = [
+        card
+        for card in report.get("code_cards") or []
+        if isinstance(card, dict) and str(card.get("text") or "").strip()
+    ]
+    if shown:
+        lines += ["## Код и материалы на экране", ""]
+        lines.append(
+            "Текст распознан OCR с кадров демонстрации экрана и может содержать ошибки. "
+            "Ссылки на карточки C<n> в разделах выше указывают на эти материалы."
+        )
+        lines.append("")
+        for card in shown:
+            code_id = str(card.get("code_id"))
+            kind = "код" if card.get("kind") == "code" else "материал"
+            start = float(card.get("start") or 0.0)
+            end = float(card.get("end") or start)
+            lines.append(f"### {code_id} — {_timestamp(start)}–{_timestamp(end)} ({kind})")
+            frame = card.get("frame")
+            if frames_dir and frame:
+                lines += [f"![Кадр {code_id}]({frames_dir}/{frame})", ""]
+            text = str(card.get("text") or "").rstrip()
+            fence = "````" if "```" in text else "```"
+            lines += [f"{fence}text", text, fence, ""]
     return "\n".join(lines).rstrip() + "\n"

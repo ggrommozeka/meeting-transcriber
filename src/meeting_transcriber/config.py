@@ -110,6 +110,32 @@ class TerminologyConfig:
 
 
 @dataclass
+class VisualConfig:
+    # Screen frames are an optional, CPU-only stage. When disabled the pipeline
+    # behaves exactly as before and never touches the video stream.
+    enabled: bool = False
+    backend: str = "tesseract"
+    tesseract: str = "tesseract"
+    languages: list[str] = field(default_factory=lambda: ["rus", "eng"])
+    # Optional local directory with <lang>.traineddata (offline runs).
+    tessdata_dir: str | None = None
+    frame_interval_seconds: float = 4.0
+    scene_threshold: float = 0.30
+    dedupe_distance: int = 6
+    min_text_chars: int = 20
+    # Region passed to OCR as fractions of the frame: left, top, right, bottom.
+    # The default removes browser/IDE chrome and chat sidebars while keeping
+    # slides and the code editor.
+    crop: list[float] = field(default_factory=lambda: [0.22, 0.09, 0.90, 0.95])
+    keep_code_frames: bool = True
+    max_frames: int = 800
+    max_cards: int = 120
+    report_context_chars: int = 1200
+    align_window_seconds: float = 30.0
+    ocr_timeout_seconds: int = 60
+
+
+@dataclass
 class LLMConfig:
     enabled: bool = True
     base_url: str = "http://127.0.0.1:8080/v1"
@@ -152,6 +178,7 @@ class AppConfig:
     asr: ASRConfig = field(default_factory=ASRConfig)
     diarization: DiarizationConfig = field(default_factory=DiarizationConfig)
     terminology: TerminologyConfig = field(default_factory=TerminologyConfig)
+    visual: VisualConfig = field(default_factory=VisualConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
     pipeline: PipelineConfig = field(default_factory=PipelineConfig)
@@ -252,6 +279,7 @@ def load_config(path: str | Path | None = None, overrides: dict[str, Any] | None
         asr=_build(ASRConfig, data["asr"], "asr"),
         diarization=_build(DiarizationConfig, data["diarization"], "diarization"),
         terminology=_build(TerminologyConfig, data["terminology"], "terminology"),
+        visual=_build(VisualConfig, data["visual"], "visual"),
         llm=_build(LLMConfig, data["llm"], "llm"),
         output=_build(OutputConfig, data["output"], "output"),
         pipeline=_build(PipelineConfig, data["pipeline"], "pipeline"),
@@ -318,6 +346,27 @@ def validate_config(cfg: AppConfig) -> None:
         raise ConfigError("llm.max_summary_sentences must be >= 1")
     if cfg.llm.max_topic_summary_chars < 80:
         raise ConfigError("llm.max_topic_summary_chars must be >= 80")
+    if cfg.visual.backend != "tesseract":
+        raise ConfigError(
+            f"unsupported visual.backend '{cfg.visual.backend}'; supported: tesseract"
+        )
+    if cfg.visual.frame_interval_seconds <= 0:
+        raise ConfigError("visual.frame_interval_seconds must be positive")
+    if not 0.0 <= cfg.visual.scene_threshold <= 1.0:
+        raise ConfigError("visual.scene_threshold must be within [0, 1]")
+    if cfg.visual.dedupe_distance < 0:
+        raise ConfigError("visual.dedupe_distance must be >= 0")
+    if len(cfg.visual.crop) != 4:
+        raise ConfigError("visual.crop must contain 4 fractions: left, top, right, bottom")
+    left, top, right, bottom = cfg.visual.crop
+    if not (0.0 <= left < right <= 1.0 and 0.0 <= top < bottom <= 1.0):
+        raise ConfigError("visual.crop fractions must satisfy 0 <= left < right <= 1 and 0 <= top < bottom <= 1")
+    if cfg.visual.max_frames < 1 or cfg.visual.max_cards < 1:
+        raise ConfigError("visual.max_frames and visual.max_cards must be >= 1")
+    if cfg.visual.report_context_chars < 0:
+        raise ConfigError("visual.report_context_chars must be >= 0")
+    if cfg.visual.align_window_seconds < 0:
+        raise ConfigError("visual.align_window_seconds must be >= 0")
     if cfg.llm.report_style not in {"asd-ste100", "plain"}:
         raise ConfigError("llm.report_style must be 'asd-ste100' or 'plain'")
     if cfg.llm.num_ctx < 2048:
