@@ -10,6 +10,8 @@ during inference.
 ## Key properties
 
 - **Video or audio input** — FFmpeg extracts the selected audio track losslessly.
+- **Screen context from video** — optional local OCR of slides and code shown
+  on screen; report items link back to the exact code cards and timestamps.
 - **Local ASR** — faster-whisper / Whisper large-v3-turbo, CTranslate2.
 - **Diarization without a 4-speaker cap** — Silero VAD → TitaNet-Large → NeMo
   spectral clustering, up to 20 speakers.
@@ -23,6 +25,36 @@ during inference.
 
 Requirements: Linux, Python 3.10+, FFmpeg, an NVIDIA GPU with 8 GB+ VRAM
 (CPU works for testing only).
+
+Two simple commands write the transcript next to the input file:
+
+```bash
+# Audio/transcript only
+meeting-transcriber transcribe -i /path/to/meeting.mp4
+
+# Audio + OCR of slides/code shown in the video
+meeting-transcriber transcribe-video -i /path/to/meeting.mp4
+```
+
+The same two entry points are available from Python:
+
+```python
+from meeting_transcriber import transcribe_audio, transcribe_video
+
+result = transcribe_video("/path/to/meeting.mp4")
+print(result.transcript.meeting_id)
+```
+
+Both commands and helpers skip the LLM report. Use `--output-dir DIR` to change
+the output location, `--keep-frames/--no-keep-frames` for saved code frames, and
+`--llm` to generate the report as an extra step.
+
+The CLI shows a live per-stage progress table (audio extraction, screen OCR,
+ASR, diarization, alignment, terminology, report, output). Model download is
+interactive: `meeting-transcriber download-models` lists model groups with
+sizes and status, then asks which ones to fetch.
+
+Full setup (models, report generation, Docker):
 
 ```bash
 # 1. Host packages, venv, PyTorch CUDA, NeMo, faster-whisper
@@ -63,6 +95,8 @@ Full walkthrough, including recovery and multi-track video:
 audio/video
    │  FFmpeg: extract track → 16 kHz mono WAV → 15-min chunks (15 s overlap)
    ▼
+(optional) screen frames → dHash dedupe → Tesseract OCR → code cards C<n>
+   ▼
 faster-whisper (local CTranslate2 model)  →  raw segments + word timestamps
    ▼
 Silero VAD → NeMo TitaNet-Large → spectral clustering  →  speaker intervals
@@ -100,6 +134,8 @@ data/output/meeting.markdown   # readable transcript (+ report if generated)
 data/output/meeting.srt        # subtitles with [speaker_XX]
 data/output/meeting.report.json
 data/output/meeting.report.md
+data/output/meeting.visual.json   # OCR screen cards (code/slide) with timestamps
+data/output/meeting.frames/       # frames of code cards used in the report
 ```
 
 The JSON keeps `raw_text`, `corrected_text`, `speaker_id`, word timestamps,
@@ -131,6 +167,18 @@ meeting-transcriber label-speakers data/output/meeting.json \
 meeting-transcriber report data/output/meeting.json --config config/default.yaml
 ./scripts/stop_llama_server.sh
 ```
+
+**Screen code context** — optional and disabled by default. Enable it per run:
+
+```bash
+meeting-transcriber transcribe data/input/meeting.mp4 --visual --skip-llm
+```
+
+Install Tesseract with Russian and English data
+(`scripts/install_host_dependencies.sh` does it). Disable explicitly with
+`--no-visual`; keep frames with `--keep-frames`. The report gets a
+`код: C<n> (00:12:22)` reference on each linked item and a
+“Код и материалы на экране” appendix with OCR text and frame links.
 
 **Multi-track video:**
 
@@ -187,6 +235,14 @@ terminology:
   profiles: [general-it]
   threshold: 0.86
   apply_corrections: true
+
+visual:
+  enabled: false
+  backend: tesseract
+  languages: [rus, eng]
+  frame_interval_seconds: 4
+  crop: [0.22, 0.09, 0.90, 0.95]   # left, top, right, bottom
+  keep_code_frames: true
 
 llm:
   enabled: true

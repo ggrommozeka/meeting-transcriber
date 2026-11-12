@@ -6,7 +6,9 @@ import gc
 import json
 import platform
 import re
+import shutil
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,6 +31,8 @@ from ..postprocessing.meeting_report import generate_meeting_report, render_repo
 from ..speakers import apply_speaker_names, load_speaker_map
 from ..terminology.correction import TerminologyCorrector
 from ..types import PipelineRunInfo, Transcript
+from ..visual import VisualResult, extract_visual, load_visual_result
+from ..visual.types import CodeCard
 from . import persistence
 from . import state as state_mod
 
@@ -39,6 +43,7 @@ class RunResult:
     outputs: dict[str, Path] = field(default_factory=dict)
     report: dict[str, Any] | None = None
     work_dir: Path | None = None
+    visual: VisualResult | None = None
 
 
 def sanitize_meeting_id(value: str) -> str:
@@ -59,9 +64,11 @@ class Pipeline:
         profile: str | None = None,
         output_dir: str | None = None,
         speaker_map: str | None = None,
+        progress: Any | None = None,
     ) -> None:
         self.cfg = cfg
         self.force = force
+        self.progress = progress
         self.skip_diarization = skip_diarization
         self.skip_llm = skip_llm
         self.speaker_map_path = Path(speaker_map).expanduser() if speaker_map else None
@@ -120,81 +127,150 @@ class Pipeline:
 
         # 1. audio ---------------------------------------------------------
         started = time.perf_counter()
-        prepared = self._stage_preprocess(
-            source, work_dir, state, fingerprints["preprocess"]
-        )
+        with self._stage_progress("preprocess", "Извлечение аудио"):
+            prepared = self._stage_preprocess(
+                source, work_dir, state, fingerprints["preprocess"]
+            )
         timings["preprocess"] = round(time.perf_counter() - started, 3)
 
-        # 2. ASR -----------------------------------------------------------
+        # 2. visual screen analysis (optional, CPU) ----------------------
+        started = time.perf_counter()
+        if self.cfg.visual.enabled and prepared.metadata.has_video:
+            with self._stage_progress("visual", "Анализ кадров видео"):
+                visual = self._stage_visual(
+                    source, prepared, work_dir, state, fingerprints["visual"]
+                )
+        else:
+            visual = self._stage_visual(
+                source, prepared, work_dir, state, fingerprints["visual"]
+            )
+            if self.progress is not None:
+                self.progress.skip_stage("visual", "Анализ кадров видео")
+        timings["visual"] = round(time.perf_counter() - started, 3)
+        warnings.extend(visual.warnings)
+
+        # 3. ASR -----------------------------------------------------------
         started = time.perf_counter()
         _reset_peak()
-        asr_result = self._stage_asr(prepared, work_dir, state, fingerprints["asr"])
+        with self._stage_progress("asr", "Распознавание речи"):
+            asr_result = self._stage_asr(
+                prepared, work_dir, state, fingerprints["asr"]
+            )
         timings["asr"] = round(time.perf_counter() - started, 3)
         peak_asr = _peak_mb()
         warnings.extend(asr_result.warnings)
 
-        # 3. diarization ---------------------------------------------------
+        # 4. diarization ---------------------------------------------------
         started = time.perf_counter()
         _reset_peak()
-        diarization = self._stage_diarization(
-            prepared, work_dir, state, fingerprints["diarization"]
-        )
+        if self.skip_diarization or not self.cfg.diarization.enabled:
+            diarization = self._stage_diarization(
+                prepared, work_dir, state, fingerprints["diarization"]
+            )
+            if self.progress is not None:
+                self.progress.skip_stage("diarization", "Диаризация")
+        else:
+            with self._stage_progress("diarization", "Диаризация"):
+                diarization = self._stage_diarization(
+                    prepared, work_dir, state, fingerprints["diarization"]
+                )
         timings["diarization"] = round(time.perf_counter() - started, 3)
         peak_diarization = _peak_mb()
         warnings.extend(diarization.warnings)
 
-        # 4. alignment + transcript ---------------------------------------
+        # 5. alignment + transcript ---------------------------------------
         started = time.perf_counter()
-        transcript = self._stage_alignment(
-            prepared,
-            asr_result,
-            diarization,
-            work_dir,
-            state,
-            meeting_id,
-            warnings,
-            fingerprints["alignment"],
-        )
+        with self._stage_progress("alignment", "Выравнивание реплик"):
+            transcript = self._stage_alignment(
+                prepared,
+                asr_result,
+                diarization,
+                work_dir,
+                state,
+                meeting_id,
+                warnings,
+                fingerprints["alignment"],
+            )
         timings["alignment"] = round(time.perf_counter() - started, 3)
 
-        # 5. terminology ---------------------------------------------------
+        # 6. terminology ---------------------------------------------------
         started = time.perf_counter()
-        warnings.extend(
-            self._stage_terminology(
-                transcript, work_dir, state, fingerprints["terminology"]
+        with self._stage_progress("terminology", "Терминология"):
+            warnings.extend(
+                self._stage_terminology(
+                    transcript, work_dir, state, fingerprints["terminology"]
+                )
             )
-        )
         timings["terminology"] = round(time.perf_counter() - started, 3)
 
         if self.speaker_map:
             applied = apply_speaker_names(transcript, self.speaker_map)
             warnings.append(f"applied display names for {applied} speaker(s)")
 
-        # 6. optional LLM report ------------------------------------------
+        # 7. optional LLM report ------------------------------------------
         started = time.perf_counter()
-        report, report_warnings = self._stage_report(
-            transcript, work_dir, state, fingerprints["llm_report"]
-        )
+        if self.skip_llm or not self.cfg.llm.enabled:
+            report, report_warnings = self._stage_report(
+                transcript,
+                visual.cards,
+                work_dir,
+                state,
+                fingerprints["llm_report"],
+            )
+            if self.progress is not None:
+                self.progress.skip_stage("llm_report", "LLM-отчёт")
+        else:
+            with self._stage_progress("llm_report", "LLM-отчёт"):
+                report, report_warnings = self._stage_report(
+                    transcript,
+                    visual.cards,
+                    work_dir,
+                    state,
+                    fingerprints["llm_report"],
+                )
         timings["llm_report"] = round(time.perf_counter() - started, 3)
         warnings.extend(report_warnings)
 
-        # 7. persist + outputs --------------------------------------------
-        transcript.config_snapshot = self.cfg.to_dict()
-        transcript.run = run
-        transcript.warnings = _dedupe(warnings)
-        transcript.run.finished_at = _now()
-        transcript.run.stage_timings_seconds = timings
-        transcript.run.vram_peak_mb = max(
-            [value for value in (peak_asr, peak_diarization) if value is not None],
-            default=None,
-        )
-        persistence.save_transcript(transcript, work_dir / "transcript.json")
-        state_mod.save_state(work_dir, state)
+        # 8. persist + outputs --------------------------------------------
+        started = time.perf_counter()
+        with self._stage_progress("outputs", "Сохранение результатов"):
+            transcript.config_snapshot = self.cfg.to_dict()
+            transcript.run = run
+            transcript.warnings = _dedupe(warnings)
+            transcript.run.finished_at = _now()
+            transcript.run.stage_timings_seconds = timings
+            transcript.run.vram_peak_mb = max(
+                [value for value in (peak_asr, peak_diarization) if value is not None],
+                default=None,
+            )
+            persistence.save_transcript(transcript, work_dir / "transcript.json")
+            state_mod.save_state(work_dir, state)
 
-        outputs = self._write_outputs(transcript, report)
-        return RunResult(transcript=transcript, outputs=outputs, report=report, work_dir=work_dir)
+            outputs = self._write_outputs(transcript, report, work_dir)
+        timings["outputs"] = round(time.perf_counter() - started, 3)
+        return RunResult(
+            transcript=transcript,
+            outputs=outputs,
+            report=report,
+            work_dir=work_dir,
+            visual=visual,
+        )
 
     # -- stages --------------------------------------------------------------
+    @contextmanager
+    def _stage_progress(self, key: str, label: str):
+        if self.progress is not None:
+            self.progress.start_stage(key, label)
+        try:
+            yield
+        except BaseException:
+            if self.progress is not None:
+                self.progress.fail_stage(key, label)
+            raise
+        else:
+            if self.progress is not None:
+                self.progress.finish_stage(key, label)
+
     def _stage_fingerprints(self, source_identity: str) -> dict[str, str]:
         cfg = self.cfg
         plain = cfg.to_dict()
@@ -243,6 +319,15 @@ class Pipeline:
         alignment = fp(
             {"type": "alignment", "asr": asr, "diarization": diarization}
         )
+        visual = fp(
+            {
+                "type": "visual",
+                "source": source_identity,
+                "audio": plain["audio"],
+                "visual": plain["visual"],
+                "skip": not cfg.visual.enabled,
+            }
+        )
         terminology = fp(
             {
                 "type": "terminology",
@@ -255,6 +340,7 @@ class Pipeline:
             {
                 "type": "llm_report",
                 "terminology": terminology,
+                "visual": visual,
                 "llm": plain["llm"],
                 "skip": self.skip_llm,
                 "speaker_map": (
@@ -269,6 +355,7 @@ class Pipeline:
             "asr": asr,
             "diarization": diarization,
             "alignment": alignment,
+            "visual": visual,
             "terminology": terminology,
             "llm_report": llm_report,
         }
@@ -312,6 +399,43 @@ class Pipeline:
         artifact.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         state_mod.mark_done(state, "preprocess", artifact, fingerprint)
         return prepared
+
+    def _stage_visual(
+        self,
+        source: Path,
+        prepared: PreparedAudio,
+        work_dir: Path,
+        state: dict[str, Any],
+        fingerprint: str,
+    ) -> VisualResult:
+        if not self.cfg.visual.enabled or not prepared.metadata.has_video:
+            warnings: list[str] = []
+            if self.cfg.visual.enabled and not prepared.metadata.has_video:
+                warnings.append(
+                    "visual analysis was requested but the input has no video stream"
+                )
+            return VisualResult(cards=[], stats={"enabled": False}, warnings=warnings, enabled=False)
+        artifact = work_dir / "visual.json"
+        if not self.force and state_mod.stage_done(
+            state, "visual", artifact, fingerprint
+        ):
+            cached = load_visual_result(work_dir)
+            if cached is not None:
+                return cached
+        result = extract_visual(
+            source,
+            work_dir,
+            self.cfg.visual,
+            ffmpeg=self.cfg.audio.ffmpeg,
+            duration=prepared.metadata.duration or 0.0,
+        )
+        artifact.write_text(
+            json.dumps(result.to_dict(), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        if result.enabled:
+            state_mod.mark_done(state, "visual", artifact, fingerprint)
+        return result
 
     def _stage_asr(
         self, prepared: PreparedAudio, work_dir: Path, state: dict[str, Any], fingerprint: str
@@ -464,7 +588,12 @@ class Pipeline:
         return warnings
 
     def _stage_report(
-        self, transcript: Transcript, work_dir: Path, state: dict[str, Any], fingerprint: str
+        self,
+        transcript: Transcript,
+        cards: list[CodeCard],
+        work_dir: Path,
+        state: dict[str, Any],
+        fingerprint: str,
     ) -> tuple[dict[str, Any] | None, list[str]]:
         if self.skip_llm or not self.cfg.llm.enabled:
             return None, []
@@ -474,7 +603,12 @@ class Pipeline:
         ):
             return json.loads(artifact.read_text(encoding="utf-8")), []
         report, warnings = generate_meeting_report(
-            transcript, self.cfg.llm, work_dir=work_dir
+            transcript,
+            self.cfg.llm,
+            work_dir=work_dir,
+            code_cards=cards,
+            visual_context_chars=self.cfg.visual.report_context_chars,
+            visual_align_window=self.cfg.visual.align_window_seconds,
         )
         if report is not None:
             artifact.write_text(
@@ -485,12 +619,18 @@ class Pipeline:
 
     # -- outputs -------------------------------------------------------------
     def _write_outputs(
-        self, transcript: Transcript, report: dict[str, Any] | None
+        self,
+        transcript: Transcript,
+        report: dict[str, Any] | None,
+        work_dir: Path,
     ) -> dict[str, Path]:
         output_dir = self.cfg.resolve(self.cfg.paths.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         outputs: dict[str, Path] = {}
         overwrite = self.force or self.cfg.output.overwrite
+        frames_rel = f"{transcript.meeting_id}.frames"
+        if report is not None:
+            _copy_report_frames(report, work_dir / "frames", output_dir / frames_rel)
         for fmt in self.cfg.output.formats:
             path = _unique_path(output_dir / f"{transcript.meeting_id}.{fmt}", overwrite)
             if fmt == "json":
@@ -501,6 +641,13 @@ class Pipeline:
                 outputs["markdown"] = write_markdown(transcript, path, report)
             elif fmt == "srt":
                 outputs["srt"] = write_srt(transcript, path)
+        visual_path = work_dir / "visual.json"
+        if self.cfg.visual.enabled and visual_path.is_file():
+            target = _unique_path(
+                output_dir / f"{transcript.meeting_id}.visual.json", overwrite
+            )
+            shutil.copy2(visual_path, target)
+            outputs["visual_json"] = target
         if report is not None:
             report_json = _unique_path(
                 output_dir / f"{transcript.meeting_id}.report.json", overwrite
@@ -511,7 +658,9 @@ class Pipeline:
             report_md = _unique_path(
                 output_dir / f"{transcript.meeting_id}.report.md", overwrite
             )
-            report_md.write_text(render_report_markdown(report), encoding="utf-8")
+            report_md.write_text(
+                render_report_markdown(report, frames_dir=frames_rel), encoding="utf-8"
+            )
             outputs["report_json"] = report_json
             outputs["report_markdown"] = report_md
         return outputs
@@ -532,6 +681,25 @@ class Pipeline:
 
 
 # -- helpers -----------------------------------------------------------------
+def _copy_report_frames(
+    report: dict[str, Any], source_dir: Path, target_dir: Path
+) -> None:
+    """Copy only frames referenced by the report next to the Markdown file."""
+
+    frames = {
+        str(card.get("frame"))
+        for card in report.get("code_cards") or []
+        if isinstance(card, dict) and card.get("frame")
+    }
+    if not frames:
+        return
+    target_dir.mkdir(parents=True, exist_ok=True)
+    for name in frames:
+        source = source_dir / name
+        if source.is_file():
+            shutil.copy2(source, target_dir / name)
+
+
 def _build_chunks(
     wav_path: Path, chunk_dir: Path, windows: list[tuple[float, float]]
 ) -> list[Any]:

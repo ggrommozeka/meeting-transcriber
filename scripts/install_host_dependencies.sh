@@ -56,6 +56,17 @@ if [[ "$INSTALL_SYSTEM" == "1" ]]; then
   else
     echo "FFmpeg: $(ffmpeg -version | head -n1)"
   fi
+
+  if ! command -v tesseract >/dev/null 2>&1; then
+    echo "Installing Tesseract OCR (rus+eng)..."
+    if command -v apt-get >/dev/null 2>&1; then
+      sudo apt-get install -y tesseract-ocr tesseract-ocr-rus tesseract-ocr-eng
+    else
+      echo "Install tesseract-ocr with rus/eng language data manually" >&2
+    fi
+  else
+    echo "Tesseract: $(tesseract --version 2>/dev/null | head -n1)"
+  fi
 fi
 
 if command -v nvidia-smi >/dev/null 2>&1; then

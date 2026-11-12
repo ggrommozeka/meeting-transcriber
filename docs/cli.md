@@ -2,6 +2,8 @@
 
 ```text
 meeting-transcriber transcribe <audio-or-video> [options]
+meeting-transcriber transcribe -i <audio-or-video> [options]
+meeting-transcriber transcribe-video -i <video> [options]
 meeting-transcriber extract-audio <media> [options]
 meeting-transcriber speakers <transcript.json> [options]
 meeting-transcriber label-speakers <transcript.json> --map <speakers.yaml>
@@ -11,6 +13,20 @@ meeting-transcriber list-models [--only ...]
 meeting-transcriber download-models [--only ...] [--force]
 meeting-transcriber validate-config [--config PATH]
 meeting-transcriber build-glossary <project-path> [options]
+```
+
+`transcribe` and `transcribe-video` accept `-i/--input` (a positional path still
+works). If `--output-dir` is omitted, the transcript is written next to the
+input file. `transcribe-video` enables `visual` and skips the LLM report.
+
+Python API:
+
+```python
+from meeting_transcriber import transcribe_audio, transcribe_video
+
+transcribe_audio("meeting.mp4")            # no video analysis
+transcribe_video("meeting.mp4")            # OCR of slides/code
+transcribe_video("meeting.mp4", output_dir="out")
 ```
 
 Global options accepted by subcommands that use configuration:
@@ -30,17 +46,22 @@ meeting-transcriber transcribe data/input/meeting.webm \
 
 | Option | Meaning |
 |---|---|
+| `-i, --input FILE` | input audio/video (positional path also accepted) |
 | `--language ru` | explicit ASR language |
 | `--output-dir DIR` | override `paths.output_dir` |
 | `--profile NAME` | use one terminology profile |
 | `--num-speakers N` | known participant count (oracle mode) |
 | `--max-speakers N` | upper bound for automatic counting (default 20) |
 | `--skip-diarization` | ASR only |
-| `--skip-llm` | do not generate the report |
+| `--skip-llm` | do not generate the report (default for the simple commands) |
+| `--llm` | generate the LLM report (requires the local llama-server) |
 | `--speaker-map FILE` | apply display names before report/output |
 | `--report-style STYLE` | `asd-ste100` (short) or `plain` (full report) |
 | `--device cuda\|cpu\|auto` | override device |
 | `--audio-stream N` | 0-based audio track index (FFmpeg `0:a:N`) |
+| `--visual/--no-visual` | enable optional OCR of slides/code (off by default) |
+| `--keep-frames/--no-keep-frames` | Keep frames of code cards next to the report |
+| `--ocr-backend tesseract` | Local OCR backend for visual analysis |
 | `--force` | ignore cached stages and overwrite outputs |
 
 ## extract-audio
@@ -89,6 +110,7 @@ meeting-transcriber report data/output/meeting.json \
 |---|---|
 | `--map FILE` | apply speaker names before generation |
 | `--report-style STYLE` | `asd-ste100` (short) or `plain` (full report) |
+| `--visual/--no-visual` | use cached OCR screen cards from `work/<meeting>/visual.json` |
 
 Writes `<name>.report.json`, `<name>.report.md`, and appends the report to
 `<name>.markdown`.
@@ -102,7 +124,10 @@ meeting-transcriber list-models
 ```
 
 `--only` accepts `all`, `asr`, `diarization`, `llm`. `download-models` is the
-only command that accesses the network for weights.
+only command that accesses the network for weights. Without `--only` on a
+terminal it shows an interactive table with model sizes and presence, then asks
+which groups to download; use `--only all` for non-interactive full download.
+Downloads show per-file progress bars and verify SHA-256 hashes.
 
 ## validate-config
 

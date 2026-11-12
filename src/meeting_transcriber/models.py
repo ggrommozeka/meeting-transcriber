@@ -121,7 +121,12 @@ def _human(size: float) -> str:
     return f"{size:.1f} TiB"
 
 
-def _download_file(url: str, destination: Path, expected_size: int | None) -> None:
+def _download_file(
+    url: str,
+    destination: Path,
+    expected_size: int | None,
+    on_progress: Any | None = None,
+) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     tmp = destination.with_suffix(destination.suffix + ".part")
     request = urllib.request.Request(url, headers={"User-Agent": "meeting-transcriber/0.1"})
@@ -136,7 +141,9 @@ def _download_file(url: str, destination: Path, expected_size: int | None) -> No
                     break
                 handle.write(block)
                 downloaded += len(block)
-                if total and downloaded / total - last_report >= 0.05:
+                if on_progress is not None:
+                    on_progress(downloaded, total)
+                elif total and downloaded / total - last_report >= 0.05:
                     last_report = downloaded / total
                     print(
                         f"    {downloaded * 100 / total:5.1f}%  {_human(downloaded)} / {_human(total)}",
@@ -170,6 +177,7 @@ def download_models(
     models_dir: str | Path,
     only: str = "all",
     force: bool = False,
+    progress: Any | None = None,
 ) -> int:
     manifest = load_manifest(manifest_path)
     models_root = Path(models_dir).expanduser().resolve()
@@ -181,7 +189,10 @@ def download_models(
 
     failures: list[str] = []
     for group in groups:
-        print(f"\n== {group.key}: {group.name} ({group.license})", file=sys.stderr)
+        if progress is not None:
+            progress.group_start(group.key, group.name)
+        else:
+            print(f"\n== {group.key}: {group.name} ({group.license})", file=sys.stderr)
         target = models_root / group.target_dir
         target.mkdir(parents=True, exist_ok=True)
         for model_file in group.files:
@@ -196,28 +207,51 @@ def download_models(
                 elif expected:
                     print(f"  = {relative}: already present and verified", file=sys.stderr)
                     lock[relative] = {"sha256": actual, "size": destination.stat().st_size}
+                    if progress is not None:
+                        progress.file_skipped(relative)
                     continue
                 else:
                     print(f"  = {relative}: already present (no recorded hash)", file=sys.stderr)
                     lock[relative] = {"sha256": actual, "size": destination.stat().st_size}
+                    if progress is not None:
+                        progress.file_skipped(relative)
                     continue
             if group.repo == "local":
                 failures.append(f"{relative}: missing local asset and no download URL")
                 continue
-            print(f"  + {relative} ({_human(model_file.size or 0)})", file=sys.stderr)
+            if progress is None:
+                print(f"  + {relative} ({_human(model_file.size or 0)})", file=sys.stderr)
+            else:
+                progress.file_start(relative, model_file.size)
             try:
-                _download_file(model_file.url, destination, model_file.size)
+                _download_file(
+                    model_file.url,
+                    destination,
+                    model_file.size,
+                    on_progress=(
+                        (lambda downloaded, total, rel=relative: progress.file_advance(rel, downloaded, total))
+                        if progress is not None
+                        else None
+                    ),
+                )
             except ModelIntegrityError as exc:
                 failures.append(str(exc))
+                if progress is not None:
+                    progress.file_done(relative, ok=False)
                 continue
             actual = _sha256(destination)
             expected = model_file.sha256 or recorded.get("sha256")
             if expected and actual != expected:
                 destination.unlink(missing_ok=True)
                 failures.append(f"{relative}: SHA-256 mismatch (expected {expected}, got {actual})")
+                if progress is not None:
+                    progress.file_done(relative, ok=False)
                 continue
             lock[relative] = {"sha256": actual, "size": destination.stat().st_size}
-            print(f"  ✓ {relative}: verified {actual[:16]}…", file=sys.stderr)
+            if progress is not None:
+                progress.file_done(relative, ok=True)
+            else:
+                print(f"  ✓ {relative}: verified {actual[:16]}…", file=sys.stderr)
 
         license_note = (
             f"Model: {group.name}\n"

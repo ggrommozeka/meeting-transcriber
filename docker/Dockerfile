@@ -9,7 +9,9 @@ ENV PYTHONUNBUFFERED=1 \
     HF_HOME=/tmp/hf-home
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg curl ca-certificates \
+    && apt-get install -y --no-install-recommends \
+        ffmpeg curl ca-certificates \
+        tesseract-ocr tesseract-ocr-rus tesseract-ocr-eng \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

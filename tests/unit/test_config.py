@@ -16,6 +16,7 @@ def test_default_config_is_valid():
     assert cfg.asr.local_files_only is True
     assert cfg.llm.enabled is True
     assert cfg.llm.model == "qwen3.5-9b"
+    assert cfg.visual.enabled is False
     assert cfg.models_path().name == "models"
 
 
