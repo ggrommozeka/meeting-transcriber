@@ -2,24 +2,31 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, ScrollableContainer, Vertical
+from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
+    ContentSwitcher,
     DataTable,
+    DirectoryTree,
     Footer,
     Header,
     Input,
     Label,
     ProgressBar,
+    RadioButton,
+    RadioSet,
     RichLog,
     Select,
     Static,
     Switch,
+    TextArea,
 )
 
 from ..config import AppConfig
@@ -50,6 +57,15 @@ Button { margin-right: 1; }
 #log { height: 10; border: round #2a3a4a; background: #0d1319; }
 ProgressBar { margin: 1 0; }
 .muted { color: #8b9bab; }
+#report-modal { align: center middle; }
+#report-dialog { width: 96; height: 38; border: round #3a5a72; background: #131b24; padding: 1 2; }
+#report-dialog .title { margin-bottom: 1; }
+#report-mode { height: auto; }
+#report-switcher { height: 12; margin: 1 0; }
+#prompt-editor { height: 10; border: round #2a3a4a; }
+#prompt-counter { height: 1; color: #8b9bab; }
+#file-dialog { width: 80; height: 30; border: round #3a5a72; background: #131b24; padding: 1 2; }
+#file-tree { height: 20; }
 """
 
 
@@ -338,6 +354,177 @@ class SetupApp(BaseWizard):
             self._llama_worker()
 
 
+@dataclass
+class ReportChoice:
+    mode: str
+    custom_prompt: str | None = None
+
+
+class PromptFilePicker(ModalScreen[Path | None]):
+    """Small file picker for .md/.txt prompt files."""
+
+    BINDINGS = [("escape", "cancel", "Отмена")]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="file-dialog"):
+            yield Label("Выберите файл с промптом", classes="title")
+            yield DirectoryTree(Path.cwd(), id="file-tree")
+            yield Button("Отмена", id="file-cancel")
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def on_directory_tree_file_selected(self, event: DirectoryTree.FileSelected) -> None:
+        self.dismiss(Path(event.path))
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "file-cancel":
+            self.dismiss(None)
+
+
+class ReportOptionsScreen(ModalScreen[ReportChoice]):
+    """Choose report mode or enter a one-off custom prompt."""
+
+    BINDINGS = [("escape", "cancel", "Назад")]
+    _MODES = ["task_discussion", "status_meeting", "custom"]
+    _HELP = {
+        "task_discussion": (
+            "[bold]Обсуждение задачи 1:1[/bold]\n"
+            "Черновик задачи: цель, границы, требования, C++-модули, API/ABI, "
+            "критерии приёмки и открытые вопросы. Речевой шум отфильтровывается.\n\n"
+            "[yellow]Рекомендуется включить OCR видео[/yellow], чтобы получить "
+            "точные имена классов и файлов."
+        ),
+        "status_meeting": (
+            "[bold]Статус-митинг[/bold]\n"
+            "Прогресс по задачам: кто, что сделал, что дальше, какие блокеры. "
+            "Отдельно фиксируются новые задачи.\n\n"
+            "[yellow]Для имён вместо speaker_id заполните speakers.yaml[/yellow]."
+        ),
+        "custom": (
+            "[bold]Свой промпт[/bold]\n"
+            "Произвольные инструкции добавляются к системному промпту. "
+            "JSON-схема, ссылки S<n> и C<n> сохраняются."
+        ),
+    }
+
+    def __init__(self, initial: ReportChoice | None = None) -> None:
+        super().__init__()
+        self.initial = initial
+        self.max_chars = load_local_config().llm.prompt_max_chars
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="report-dialog"):
+            yield Label("Параметры отчёта", classes="title")
+            yield RadioSet(
+                RadioButton("Обсуждение задачи 1:1", id="mode-task", value=True),
+                RadioButton("Статус-митинг", id="mode-status"),
+                RadioButton("Свой промпт", id="mode-custom"),
+                id="report-mode",
+            )
+            yield ContentSwitcher(
+                Static(self._HELP["task_discussion"], id="mode-help"),
+                Vertical(
+                    TextArea(
+                        id="prompt-editor",
+                        placeholder="Опишите фокус, структуру и стиль отчёта…",
+                        soft_wrap=True,
+                    ),
+                    Horizontal(
+                        Button("Выбрать файл", id="prompt-file"),
+                        Static("0 / 6000", id="prompt-counter"),
+                    ),
+                    id="custom-panel",
+                ),
+                initial="mode-help",
+                id="report-switcher",
+            )
+            with Horizontal(classes="row"):
+                yield Button("Назад", id="report-back")
+                yield Button("Продолжить", id="report-continue", variant="primary")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        if self.initial and self.initial.mode == "custom":
+            self.query_one("#mode-custom", RadioButton).value = True
+            self.query_one("#report-switcher", ContentSwitcher).current = "custom-panel"
+            editor = self.query_one("#prompt-editor", TextArea)
+            editor.load_text(self.initial.custom_prompt or "")
+            self._update_counter()
+        elif self.initial and self.initial.mode in self._MODES:
+            button_id = {
+                "task_discussion": "#mode-task",
+                "status_meeting": "#mode-status",
+            }.get(self.initial.mode)
+            if button_id:
+                self.query_one(button_id, RadioButton).value = True
+
+    def _update_counter(self) -> None:
+        length = len(self.query_one("#prompt-editor", TextArea).text)
+        self.query_one("#prompt-counter", Static).update(f"{length} / {self.max_chars}")
+        color = "red" if length > self.max_chars else "#8b9bab"
+        self.query_one("#prompt-counter", Static).styles.color = color
+
+    def on_radio_set_changed(self, event: RadioSet.Changed) -> None:
+        index = event.index
+        if index < 0 or index >= len(self._MODES):
+            return
+        mode = self._MODES[index]
+        switcher = self.query_one("#report-switcher", ContentSwitcher)
+        switcher.current = "custom-panel" if mode == "custom" else "mode-help"
+        if mode != "custom":
+            self.query_one("#mode-help", Static).update(self._HELP[mode])
+
+    def on_text_area_changed(self, event: TextArea.Changed) -> None:
+        if event.text_area.id == "prompt-editor":
+            self._update_counter()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "report-back":
+            self.dismiss(None)
+        elif event.button.id == "prompt-file":
+            self.app.push_screen(PromptFilePicker(), self._file_picked)
+        elif event.button.id == "report-continue":
+            self._continue()
+
+    def _file_picked(self, path: Path | None) -> None:
+        if path is None:
+            return
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            self.notify(f"Не удалось прочитать файл: {exc}", severity="error")
+            return
+        if len(text) > self.max_chars:
+            self.notify(
+                f"Файл больше лимита: {len(text)} > {self.max_chars}",
+                severity="error",
+            )
+            return
+        self.query_one("#prompt-editor", TextArea).load_text(text)
+        self._update_counter()
+
+    def _continue(self) -> None:
+        index = self.query_one("#report-mode", RadioSet).pressed_index
+        if index < 0 or index >= len(self._MODES):
+            return
+        mode = self._MODES[index]
+        prompt = self.query_one("#prompt-editor", TextArea).text.strip()
+        if mode == "custom":
+            if not prompt:
+                self.notify("Введите текст промпта или выберите файл", severity="error")
+                return
+            if len(prompt) > self.max_chars:
+                self.notify("Промпт превышает лимит", severity="error")
+                return
+        self.dismiss(
+            ReportChoice(mode=mode, custom_prompt=prompt if mode == "custom" else None)
+        )
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
 class ProcessApp(BaseWizard):
     TITLE = "meeting-transcriber · обработка"
 
@@ -345,6 +532,7 @@ class ProcessApp(BaseWizard):
         super().__init__()
         self._initial_input = str(input_path) if input_path else ""
         self._initial_output = str(output_dir) if output_dir else ""
+        self._report_choice: ReportChoice | None = None
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -373,6 +561,11 @@ class ProcessApp(BaseWizard):
                     yield Switch(value=True, id="diarization")
                     yield Label("LLM-отчёт")
                     yield Switch(id="report")
+                yield Static(
+                    "Режим отчёта выбирается перед запуском",
+                    id="report-summary",
+                    classes="muted",
+                )
                 with Horizontal(classes="row"):
                     yield Label("Стиль отчёта", classes="field")
                     yield Select(
@@ -412,6 +605,9 @@ class ProcessApp(BaseWizard):
         cfg.visual.enabled = self.query_one("#visual", Switch).value
         cfg.diarization.enabled = self.query_one("#diarization", Switch).value
         cfg.llm.enabled = self.query_one("#report", Switch).value
+        if self._report_choice is not None:
+            cfg.llm.report_mode = self._report_choice.mode
+            cfg.llm.custom_prompt = self._report_choice.custom_prompt
         cfg.llm.report_style = str(self.query_one("#style", Select).value)
         cfg.visual.keep_code_frames = self.query_one("#keep-frames", Switch).value
         cfg.terminology.profiles = [
@@ -530,7 +726,24 @@ class ProcessApp(BaseWizard):
         if event.button.id == "validate":
             self._validate_worker()
         elif event.button.id == "run":
-            self._run_worker()
+            if self.query_one("#report", Switch).value:
+                self.push_screen(ReportOptionsScreen(self._report_choice), self._report_chosen)
+            else:
+                self._report_choice = None
+                self._run_worker()
+
+    def _report_chosen(self, choice: ReportChoice | None) -> None:
+        if choice is None:
+            return
+        self._report_choice = choice
+        label = {
+            "task_discussion": "Обсуждение задачи 1:1",
+            "status_meeting": "Статус-митинг",
+            "custom": "Свой промпт",
+        }.get(choice.mode, choice.mode)
+        self.query_one("#report-summary", Static).update(f"Режим отчёта: {label}")
+        self._log(f"Режим отчёта: {label}")
+        self._run_worker()
 
 
 def run_setup() -> None:

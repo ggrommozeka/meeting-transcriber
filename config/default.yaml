@@ -133,6 +133,13 @@ llm:
   max_items_per_section: 6
   max_summary_sentences: 5
   max_topic_summary_chars: 350
+  # Report focus. `custom_prompt` (CLI/TUI, one run) overrides report_mode.
+  report_mode: general        # general | task_discussion | status_meeting
+  custom_prompt: null
+  prompt_max_chars: 6000
+  max_task_drafts: 5
+  max_progress_updates: 20
+  max_new_tasks: 10
   # "asd-ste100": short, simple, active sentences; "plain": full report.
   report_style: asd-ste100
   # Context is set when starting llama-server (`-c 8192`).

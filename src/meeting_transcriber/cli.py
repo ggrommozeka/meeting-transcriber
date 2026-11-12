@@ -95,6 +95,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Report profile: short ASD-STE100 or full plain",
     )
+    transcribe.add_argument(
+        "--report-mode",
+        choices=["general", "task_discussion", "status_meeting"],
+        default=None,
+        help="Report focus: general, task discussion or status meeting",
+    )
+    transcribe.add_argument(
+        "--prompt", default=None, help="Custom report instructions (one run)"
+    )
+    transcribe.add_argument(
+        "--prompt-file", type=Path, default=None, help="Read custom report instructions from a file"
+    )
     transcribe.add_argument("--device", choices=["cuda", "cpu", "auto"], default=None)
     transcribe.add_argument(
         "--audio-stream",
@@ -190,6 +202,16 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["asd-ste100", "plain"],
         default=None,
         help="Report profile: short ASD-STE100 or full plain",
+    )
+    report.add_argument(
+        "--report-mode",
+        choices=["general", "task_discussion", "status_meeting"],
+        default=None,
+        help="Report focus: general, task discussion or status meeting",
+    )
+    report.add_argument("--prompt", default=None, help="Custom report instructions (one run)")
+    report.add_argument(
+        "--prompt-file", type=Path, default=None, help="Read custom report instructions from a file"
     )
     _add_config_options(report)
 
@@ -389,6 +411,30 @@ def _download_models(args: argparse.Namespace, cfg: AppConfig) -> int:
     return code
 
 
+def _apply_report_args(cfg: AppConfig, args: argparse.Namespace) -> None:
+    mode = getattr(args, "report_mode", None)
+    if mode:
+        cfg.llm.report_mode = mode
+    prompt = getattr(args, "prompt", None)
+    prompt_file = getattr(args, "prompt_file", None)
+    if prompt_file:
+        path = Path(prompt_file).expanduser()
+        if not path.is_file():
+            raise ConfigError(f"prompt file not found: {path}")
+        try:
+            prompt = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise ConfigError(f"cannot read prompt file {path}: {exc}") from exc
+    if prompt is not None:
+        prompt = prompt.strip()
+        if len(prompt) > cfg.llm.prompt_max_chars:
+            raise ConfigError(
+                f"custom prompt is too long: {len(prompt)} > {cfg.llm.prompt_max_chars}"
+            )
+        cfg.llm.custom_prompt = prompt or None
+        cfg.llm.report_mode = "custom" if prompt else cfg.llm.report_mode
+
+
 def _transcribe(args: argparse.Namespace, cfg: AppConfig) -> int:
     input_path = getattr(args, "input", None) or getattr(args, "audio", None)
     if input_path is None:
@@ -399,6 +445,7 @@ def _transcribe(args: argparse.Namespace, cfg: AppConfig) -> int:
         cfg.audio.audio_stream = args.audio_stream
     if getattr(args, "report_style", None) is not None:
         cfg.llm.report_style = args.report_style
+    _apply_report_args(cfg, args)
     if getattr(args, "visual", None) is not None:
         cfg.visual.enabled = args.visual
     if getattr(args, "keep_frames", None) is not None:
@@ -536,6 +583,7 @@ def _report(args: argparse.Namespace, cfg: AppConfig) -> int:
     transcript = persistence.load_transcript(transcript_path)
     if args.report_style is not None:
         cfg.llm.report_style = args.report_style
+    _apply_report_args(cfg, args)
     if args.map:
         applied = apply_speaker_names(transcript, load_speaker_map(args.map))
         print(f"applied {applied} speaker name(s)")

@@ -124,7 +124,15 @@ meeting-transcriber report data/output/meeting.json \
 |---|---|
 | `--map FILE` | apply speaker names before generation |
 | `--report-style STYLE` | `asd-ste100` (short) or `plain` (full report) |
+| `--report-mode MODE` | `general`, `task_discussion` or `status_meeting` |
+| `--prompt TEXT` | custom instructions for this run; replaces the mode block |
+| `--prompt-file FILE` | read custom instructions from `.md`/`.txt` |
 | `--visual/--no-visual` | use cached OCR screen cards from `work/<meeting>/visual.json` |
+
+`task_discussion` adds `task_drafts` (goal, scope, requirements, constraints,
+acceptance criteria, modules, code refs). `status_meeting` adds
+`progress_updates` and `new_tasks`. A custom prompt keeps the structured JSON
+contract and report links.
 
 Writes `<name>.report.json`, `<name>.report.md`, and appends the report to
 `<name>.markdown`.

@@ -2,6 +2,8 @@ import json
 
 from meeting_transcriber.config import LLMConfig
 from meeting_transcriber.postprocessing.meeting_report import (
+    _sanitize_report,
+    _system_prompt,
     chunk_segments,
     generate_meeting_report,
     render_report_markdown,
@@ -256,3 +258,61 @@ def test_report_disabled_returns_nothing():
     )
     assert report is None
     assert warnings == []
+
+
+def test_report_modes_and_custom_prompt():
+    task = _system_prompt(LLMConfig(report_mode="task_discussion"))
+    assert "task_drafts" in task
+    assert "обсуждение задачи" in task.casefold()
+    status = _system_prompt(LLMConfig(report_mode="status_meeting"))
+    assert "progress_updates" in status
+    assert "new_tasks" in status
+    custom = _system_prompt(
+        LLMConfig(report_mode="status_meeting", custom_prompt="Фокус на рисках")
+    )
+    assert "Фокус на рисках" in custom
+    # Custom prompt replaces the mode-specific block.
+    assert "Режим: регулярный статус-митинг" not in custom
+
+
+def test_new_report_sections_are_sanitized_and_rendered():
+    payload = {
+        "task_drafts": [
+            {
+                "title": "Задача",
+                "goal": "Цель",
+                "requirements": ["Требование"],
+                "segment_refs": ["S1", "S999"],
+                "code_refs": ["C1", "C999"],
+            }
+        ],
+        "progress_updates": [
+            {
+                "owner": "speaker_00",
+                "task": "Задача",
+                "status": "in_progress",
+                "segment_refs": ["S1"],
+            }
+        ],
+        "new_tasks": [
+            {"title": "Новая", "segment_refs": ["S1"], "code_refs": ["C1"]}
+        ],
+    }
+    cleaned, dropped = _sanitize_report(payload, {"S1"}, {"C1"})
+    assert cleaned["task_drafts"][0]["segment_refs"] == ["S1"]
+    assert cleaned["task_drafts"][0]["code_refs"] == ["C1"]
+    assert cleaned["progress_updates"][0]["status"] == "in_progress"
+    assert dropped == 2
+
+    markdown = render_report_markdown(
+        {
+            "title": "Отчёт",
+            "task_drafts": cleaned["task_drafts"],
+            "progress_updates": cleaned["progress_updates"],
+            "new_tasks": cleaned["new_tasks"],
+        }
+    )
+    assert "## Черновики задач" in markdown
+    assert "## Прогресс по задачам" in markdown
+    assert "## Новые задачи" in markdown
+    assert "in_progress" in markdown

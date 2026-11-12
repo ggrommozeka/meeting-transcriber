@@ -47,8 +47,48 @@ SYSTEM_PROMPT = """Ты — ассистент протоколирования 
   "action_items": [{"task": "строка", "owner": null, "due": null, "segment_refs": ["S1"], "code_refs": ["C1"], "confidence": 0.0}],
   "risks": [{"text": "строка", "segment_refs": ["S1"], "code_refs": ["C1"]}],
   "open_questions": [{"text": "строка", "segment_refs": ["S1"], "code_refs": ["C1"]}],
-  "uncertain": [{"text": "строка", "segment_refs": ["S1"], "code_refs": ["C1"]}]
+  "uncertain": [{"text": "строка", "segment_refs": ["S1"], "code_refs": ["C1"]}],
+  "task_drafts": [{"title": "строка", "goal": "строка", "scope": ["строка"], "requirements": ["строка"], "constraints": ["строка"], "acceptance_criteria": ["строка"], "modules": ["строка"], "open_questions": ["строка"], "segment_refs": ["S1"], "code_refs": ["C1"], "confidence": 0.0}],
+  "progress_updates": [{"owner": "speaker_00", "area": "строка", "task": "строка", "status": "done|in_progress|blocked|planned|unknown", "done": ["строка"], "next": ["строка"], "blockers": ["строка"], "segment_refs": ["S1"], "code_refs": ["C1"], "confidence": 0.0}],
+  "new_tasks": [{"title": "строка", "owner": null, "context": "строка", "next_step": "строка", "segment_refs": ["S1"], "code_refs": ["C1"], "confidence": 0.0}]
 }"""
+
+MODE_PROMPTS = {
+    "task_discussion": """Режим: обсуждение задачи один на один с тимлидом.
+Твоя цель — восстановить из разговорной речи полноценную постановку задачи.
+Правила:
+- Игнорируй слова-заполнители, повторы, оговорки и незаконченные фразы; восстанавливай намерение по контексту, но не придумывай факты.
+- Отделяй обсуждение от решения. Заполняй task_drafts только для задач, которые действительно обсуждались как работа.
+- Для C++ фиксируй модули, классы, файлы, API/ABI, владение, производительность, обработку ошибок и тесты.
+- Если на экране был код, используй точные имена из блока «На экране» и обязательно ставь code_refs.
+- В task_drafts указывай цель, границы, требования, ограничения, критерии приёмки и открытые вопросы.
+- Всё неочевидное выноси в open_questions/uncertain, не додумывай.
+- Не создавай больше task_drafts, чем требуется; пустые разделы оставляй пустыми.""",
+    "status_meeting": """Режим: регулярный статус-митинг с докладами участников.
+Твоя цель — собрать прогресс по текущим задачам и отдельно новые задачи.
+Правила:
+- Создавай один progress_update на связку «участник + задача».
+- status выбирай только из: done, in_progress, blocked, planned, unknown.
+- В done/next/blockers включай только явно названные факты.
+- Не дублируй один и тот же прогресс в темах и progress_updates.
+- new_tasks — только обсуждение новой работы, а не обычные следующие шаги по текущей задаче.
+- action_items — конкретные поручения с ответственным/сроком, только если они явно названы.
+- owner бери из display_name, если имена заданы, иначе из speaker_id.
+- Блокеры и риски выноси отдельно.""",
+}
+
+
+def _system_prompt(cfg: LLMConfig) -> str:
+    prompt = SYSTEM_PROMPT
+    if cfg.custom_prompt:
+        prompt += (
+            "\n\nДополнительные требования пользователя (выполняй их, но не меняй "
+            "JSON-схему и правила ссылок):\n"
+            + cfg.custom_prompt
+        )
+    elif cfg.report_mode in MODE_PROMPTS:
+        prompt += "\n\n" + MODE_PROMPTS[cfg.report_mode]
+    return _with_style(prompt, cfg)
 
 CONSOLIDATE_SYSTEM_PROMPT = """Ты — редактор протокола совещания. Тебе дан список тем, извлечённых из последовательных частей одного транскрипта.
 Строгие правила:
@@ -258,6 +298,11 @@ def _sanitize_report(
     def text(value: Any) -> str:
         return str(value or "").strip()
 
+    def strings(value: Any) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        return [str(item).strip() for item in value if str(item).strip()]
+
     cleaned: dict[str, Any] = {
         "title": text(report.get("title")) or "Протокол совещания",
         "summary": text(report.get("summary")),
@@ -267,6 +312,9 @@ def _sanitize_report(
         "risks": [],
         "open_questions": [],
         "uncertain": [],
+        "task_drafts": [],
+        "progress_updates": [],
+        "new_tasks": [],
     }
     for item in report.get("topics") or []:
         if isinstance(item, dict):
@@ -305,6 +353,55 @@ def _sanitize_report(
                     "task": text(item.get("task")),
                     "owner": item.get("owner"),
                     "due": item.get("due"),
+                    "segment_refs": refs(item.get("segment_refs"), valid),
+                    "code_refs": refs(item.get("code_refs"), valid_codes),
+                    "confidence": _as_float(item.get("confidence")),
+                }
+            )
+    for item in report.get("task_drafts") or []:
+        if isinstance(item, dict):
+            cleaned["task_drafts"].append(
+                {
+                    "title": text(item.get("title")),
+                    "goal": text(item.get("goal")),
+                    "scope": strings(item.get("scope")),
+                    "requirements": strings(item.get("requirements")),
+                    "constraints": strings(item.get("constraints")),
+                    "acceptance_criteria": strings(item.get("acceptance_criteria")),
+                    "modules": strings(item.get("modules")),
+                    "open_questions": strings(item.get("open_questions")),
+                    "segment_refs": refs(item.get("segment_refs"), valid),
+                    "code_refs": refs(item.get("code_refs"), valid_codes),
+                    "confidence": _as_float(item.get("confidence")),
+                }
+            )
+    for item in report.get("progress_updates") or []:
+        if isinstance(item, dict):
+            status = text(item.get("status")).casefold()
+            if status not in {"done", "in_progress", "blocked", "planned", "unknown"}:
+                status = "unknown"
+            cleaned["progress_updates"].append(
+                {
+                    "owner": text(item.get("owner")),
+                    "area": text(item.get("area")),
+                    "task": text(item.get("task")),
+                    "status": status,
+                    "done": strings(item.get("done")),
+                    "next": strings(item.get("next")),
+                    "blockers": strings(item.get("blockers")),
+                    "segment_refs": refs(item.get("segment_refs"), valid),
+                    "code_refs": refs(item.get("code_refs"), valid_codes),
+                    "confidence": _as_float(item.get("confidence")),
+                }
+            )
+    for item in report.get("new_tasks") or []:
+        if isinstance(item, dict):
+            cleaned["new_tasks"].append(
+                {
+                    "title": text(item.get("title")),
+                    "owner": item.get("owner"),
+                    "context": text(item.get("context")),
+                    "next_step": text(item.get("next_step")),
                     "segment_refs": refs(item.get("segment_refs"), valid),
                     "code_refs": refs(item.get("code_refs"), valid_codes),
                     "confidence": _as_float(item.get("confidence")),
@@ -361,6 +458,23 @@ def _dedupe_items(
                 list(result[duplicate_index].get("code_refs") or []),
                 list(item.get("code_refs") or []),
             )
+            for field in (
+                "scope",
+                "requirements",
+                "constraints",
+                "acceptance_criteria",
+                "modules",
+                "open_questions",
+                "done",
+                "next",
+                "blockers",
+            ):
+                if field in result[duplicate_index] or field in item:
+                    merged = list(result[duplicate_index].get(field) or [])
+                    for value in item.get(field) or []:
+                        if value not in merged:
+                            merged.append(value)
+                    result[duplicate_index][field] = merged
     return result
 
 
@@ -380,9 +494,22 @@ def _aggregate_parts(parts: list[dict[str, Any]]) -> dict[str, Any]:
         "risks": [],
         "open_questions": [],
         "uncertain": [],
+        "task_drafts": [],
+        "progress_updates": [],
+        "new_tasks": [],
     }
     for part in parts:
-        for key in ("topics", "decisions", "action_items", "risks", "open_questions", "uncertain"):
+        for key in (
+            "topics",
+            "decisions",
+            "action_items",
+            "risks",
+            "open_questions",
+            "uncertain",
+            "task_drafts",
+            "progress_updates",
+            "new_tasks",
+        ):
             aggregated[key].extend(part.get(key) or [])
 
     aggregated["topics"] = _dedupe_items(aggregated["topics"], "title", 0.85)
@@ -390,6 +517,17 @@ def _aggregate_parts(parts: list[dict[str, Any]]) -> dict[str, Any]:
     aggregated["action_items"] = _dedupe_items(aggregated["action_items"], "task", 0.9)
     for key in ("risks", "open_questions", "uncertain"):
         aggregated[key] = _dedupe_items(aggregated[key], "text", 0.9)
+    aggregated["task_drafts"] = _dedupe_items(aggregated["task_drafts"], "title", 0.8)
+    progress = []
+    for item in aggregated["progress_updates"]:
+        item = dict(item)
+        item["_identity"] = f"{item.get('owner', '')} {item.get('task', '')}".strip()
+        progress.append(item)
+    progress = _dedupe_items(progress, "_identity", 0.9)
+    for item in progress:
+        item.pop("_identity", None)
+    aggregated["progress_updates"] = progress
+    aggregated["new_tasks"] = _dedupe_items(aggregated["new_tasks"], "title", 0.85)
     return aggregated
 
 
@@ -543,6 +681,16 @@ def _synthesize_summary(
         "action_items": [item.get("task") for item in report.get("action_items", [])][:60],
         "risks": [item.get("text") for item in report.get("risks", [])][:60],
         "open_questions": [item.get("text") for item in report.get("open_questions", [])][:60],
+        "task_drafts": [item.get("title") for item in report.get("task_drafts", [])][:20],
+        "progress_updates": [
+            {
+                "owner": item.get("owner"),
+                "task": item.get("task"),
+                "status": item.get("status"),
+            }
+            for item in report.get("progress_updates", [])
+        ][:40],
+        "new_tasks": [item.get("title") for item in report.get("new_tasks", [])][:20],
     }
     user = (
         "Данные протокола:\n"
@@ -585,7 +733,16 @@ def _fill_code_refs_by_time(
     if not cards:
         return
     segments = {f"S{index}": segment for index, segment in enumerate(transcript.segments, start=1)}
-    for key in ("decisions", "action_items", "risks", "open_questions", "uncertain"):
+    for key in (
+        "decisions",
+        "action_items",
+        "risks",
+        "open_questions",
+        "uncertain",
+        "task_drafts",
+        "progress_updates",
+        "new_tasks",
+    ):
         for item in report.get(key) or []:
             if item.get("code_refs"):
                 continue
@@ -623,7 +780,19 @@ def _humanize_speaker_ids(report: dict[str, Any], transcript: Transcript) -> Non
             return {key: walk(item) for key, item in value.items()}
         return value
 
-    for key in ("title", "summary", "topics", "decisions", "action_items", "risks", "open_questions", "uncertain"):
+    for key in (
+        "title",
+        "summary",
+        "topics",
+        "decisions",
+        "action_items",
+        "risks",
+        "open_questions",
+        "uncertain",
+        "task_drafts",
+        "progress_updates",
+        "new_tasks",
+    ):
         if key in report:
             report[key] = walk(report[key])
 
@@ -648,6 +817,11 @@ def _limit_report(report: dict[str, Any], cfg: LLMConfig) -> None:
             topic["summary"] = _shorten_chars(
                 str(topic.get("summary") or ""), limits.max_topic_summary_chars
             )
+    report["task_drafts"] = (report.get("task_drafts") or [])[: cfg.max_task_drafts]
+    report["progress_updates"] = (report.get("progress_updates") or [])[
+        : cfg.max_progress_updates
+    ]
+    report["new_tasks"] = (report.get("new_tasks") or [])[: cfg.max_new_tasks]
     report["summary"] = _shorten_sentences(
         str(report.get("summary") or ""), limits.max_summary_sentences
     )
@@ -694,8 +868,14 @@ def generate_meeting_report(
     code_cards: list[CodeCard] | None = None,
     visual_context_chars: int = 1200,
     visual_align_window: float = 30.0,
+    report_mode: str | None = None,
+    custom_prompt: str | None = None,
 ) -> tuple[dict[str, Any] | None, list[str]]:
     warnings: list[str] = []
+    if report_mode:
+        cfg.report_mode = report_mode
+    if custom_prompt is not None:
+        cfg.custom_prompt = custom_prompt
     if not cfg.enabled:
         return None, warnings
     if not transcript.segments:
@@ -722,7 +902,11 @@ def generate_meeting_report(
                 {
                     "model": cfg.model,
                     "chunk_chars": cfg.chunk_chars,
-                    "prompt": "ids-v2-visual",
+                    "prompt": "ids-v3-modes",
+                    "mode": cfg.report_mode,
+                    "custom_prompt": hashlib.sha256(
+                        (cfg.custom_prompt or "").encode("utf-8")
+                    ).hexdigest()[:12],
                     "visual": visual_fingerprint,
                 },
                 sort_keys=True,
@@ -755,7 +939,7 @@ def generate_meeting_report(
                 )
                 payload = _chat_json(
                     client,
-                    _with_style(SYSTEM_PROMPT, cfg),
+                    _system_prompt(cfg),
                     transcript_prompt(
                         transcript,
                         selected=chunk,
@@ -793,6 +977,14 @@ def generate_meeting_report(
         warnings.extend(_consolidate_topics(client, merged, cfg, valid, valid_codes))
         _add_participants(merged, transcript)
         merged["code_cards"] = [card.to_dict() for card in code_cards]
+        merged["report_mode"] = cfg.report_mode
+        merged["prompt"] = {
+            "mode": cfg.report_mode,
+            "custom": bool(cfg.custom_prompt),
+            "sha256": hashlib.sha256(
+                (cfg.custom_prompt or _system_prompt(cfg)).encode("utf-8")
+            ).hexdigest()[:16],
+        }
         if progress:
             progress("LLM report: title and summary")
         _synthesize_summary(client, merged, cfg, speaker_labels(transcript))
@@ -896,6 +1088,68 @@ def render_report_markdown(
             if sources:
                 lines.append(f"Источники: {sources}")
             lines.append("")
+    drafts = report.get("task_drafts") or []
+    if drafts:
+        lines += ["## Черновики задач", ""]
+        for item in drafts:
+            lines.append(f"### {item.get('title') or 'Без названия'}")
+            if item.get("goal"):
+                lines += ["**Цель:** " + str(item["goal"]), ""]
+            for label, key in (
+                ("Границы", "scope"),
+                ("Требования", "requirements"),
+                ("Ограничения", "constraints"),
+                ("Критерии приёмки", "acceptance_criteria"),
+                ("Модули", "modules"),
+                ("Открытые вопросы", "open_questions"),
+            ):
+                values = item.get(key) or []
+                if values:
+                    lines.append(f"**{label}:**")
+                    lines += [f"- {value}" for value in values]
+                    lines.append("")
+            sources = _source_suffix(item, cards)
+            if sources:
+                lines.append(f"Источники: {sources}")
+                lines.append("")
+
+    progress = report.get("progress_updates") or []
+    if progress:
+        lines += ["## Прогресс по задачам", ""]
+        lines.append(
+            "| Участник | Область | Задача | Статус | Сделано | Далее | Блокеры | Источники |"
+        )
+        lines.append("|---|---|---|---|---|---|---|---|")
+        for item in progress:
+            cells = [
+                item.get("owner") or "—",
+                item.get("area") or "—",
+                item.get("task") or "—",
+                item.get("status") or "unknown",
+                "; ".join(item.get("done") or []) or "—",
+                "; ".join(item.get("next") or []) or "—",
+                "; ".join(item.get("blockers") or []) or "—",
+                _source_suffix(item, cards) or "—",
+            ]
+            escaped = [str(cell).replace("|", "\\|").replace("\n", " ") for cell in cells]
+            lines.append("| " + " | ".join(escaped) + " |")
+        lines.append("")
+
+    new_tasks = report.get("new_tasks") or []
+    if new_tasks:
+        lines += ["## Новые задачи", ""]
+        for item in new_tasks:
+            text = f"**{item.get('title') or 'Без названия'}**"
+            if item.get("owner"):
+                text += f" — ответственный: {item['owner']}"
+            if item.get("context"):
+                text += f". {item['context']}"
+            if item.get("next_step"):
+                text += f" Следующий шаг: {item['next_step']}."
+            sources = _source_suffix(item, cards)
+            lines.append(f"- {text}" + (f" — {sources}" if sources else ""))
+        lines.append("")
+
     for key, title in (
         ("decisions", "Решения"),
         ("action_items", "Задачи"),
