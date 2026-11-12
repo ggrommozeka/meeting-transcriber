@@ -705,30 +705,41 @@ class ProcessApp(BaseWizard):
             return
         assert output is not None
         cfg.paths.output_dir = str(output)
-        server = None
-        try:
-            if cfg.llm.enabled:
-                server = start_managed_server(
+        if stop_managed_server(cfg, pid_path=cfg.resolve("logs/llama-server.pid")):
+            self.call_from_thread(self._log, "старый llama-server остановлен перед обработкой")
+
+        server_holder: list = []
+
+        def before_report() -> None:
+            server_holder.append(
+                start_managed_server(
                     cfg,
                     progress=lambda message: self.call_from_thread(self._log, message),
                     log_path=cfg.resolve("logs/llama-server-tui.log"),
                     pid_path=cfg.resolve("logs/llama-server.pid"),
                 )
+            )
+
+        def after_report() -> None:
+            server = server_holder[0] if server_holder else None
+            if stop_managed_server(
+                cfg, server, pid_path=cfg.resolve("logs/llama-server.pid")
+            ):
+                self.call_from_thread(self._log, "llama-server остановлен после отчёта")
+
+        try:
             app = self
             progress = _TuiProgress(app)
             result = Pipeline(
                 cfg,
                 skip_llm=not cfg.llm.enabled,
                 progress=progress,
+                before_report=before_report if cfg.llm.enabled else None,
+                after_report=after_report if cfg.llm.enabled else None,
             ).run(source)
             self.call_from_thread(self._finish, result)
         except Exception as exc:
             self.call_from_thread(self._log, f"[red]Ошибка:[/red] {exc}")
-        finally:
-            if cfg.llm.enabled and stop_managed_server(
-                cfg, server, pid_path=cfg.resolve("logs/llama-server.pid")
-            ):
-                self.call_from_thread(self._log, "llama-server остановлен после отчёта")
 
     def _finish(self, result: RunResult) -> None:
         self.query_one("#bar", ProgressBar).progress = 100

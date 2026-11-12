@@ -121,7 +121,8 @@ meeting-transcriber report data/output/meeting.json \
 ```
 
 The command starts `llama-server` if needed and stops it after the report. If
-the server was started manually, cleanup uses `logs/llama-server.pid`.
+the server was started manually, cleanup uses `logs/llama-server.pid` or finds
+the llama process on the configured port.
 
 | Option | Meaning |
 |---|---|

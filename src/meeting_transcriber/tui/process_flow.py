@@ -300,20 +300,36 @@ def confirm_and_run(cfg: AppConfig, settings: ProcessSettings) -> int:
     if action != "run":
         return 0 if action == "cancel" else -1
 
-    server = None
-    try:
-        if settings.report:
-            server = start_managed_server(
+    if stop_managed_server(cfg, pid_path=cfg.resolve("logs/llama-server.pid")):
+        console.print("[muted]старый llama-server остановлен перед обработкой[/muted]")
+
+    server_holder: list = []
+
+    def _before_report() -> None:
+        server_holder.append(
+            start_managed_server(
                 cfg,
                 progress=lambda message: console.print(f"[muted]{message}[/muted]"),
                 log_path=cfg.resolve("logs/llama-server-questionary.log"),
                 pid_path=cfg.resolve("logs/llama-server.pid"),
             )
+        )
+
+    def _after_report() -> None:
+        server = server_holder[0] if server_holder else None
+        if stop_managed_server(
+            cfg, server, pid_path=cfg.resolve("logs/llama-server.pid")
+        ):
+            console.print("[muted]llama-server остановлен после отчёта[/muted]")
+
+    try:
         with StageProgress(show=True) as progress:
             result: RunResult = Pipeline(
                 cfg,
                 skip_llm=not settings.report,
                 progress=progress,
+                before_report=_before_report if settings.report else None,
+                after_report=_after_report if settings.report else None,
             ).run(settings.input_path)
         console.print()
         result_panel(
@@ -331,13 +347,6 @@ def confirm_and_run(cfg: AppConfig, settings: ProcessSettings) -> int:
     except (LlamaError, ConfigError) as exc:
         console.print(f"[red]{exc}[/red]")
         return 1
-    finally:
-        if settings.report:
-            stopped = stop_managed_server(
-                cfg, server, pid_path=cfg.resolve("logs/llama-server.pid")
-            )
-            if stopped:
-                console.print("[muted]llama-server остановлен после отчёта[/muted]")
 
 
 def run_process_flow(

@@ -9,6 +9,7 @@ import shutil
 import site
 import sys
 from pathlib import Path
+from typing import Any
 
 from . import __version__
 from .audio.metadata import probe_audio
@@ -479,42 +480,50 @@ def _transcribe(args: argparse.Namespace, cfg: AppConfig) -> int:
     llm_enabled = bool(getattr(args, "llm", False)) and not getattr(args, "skip_llm", False)
     if getattr(args, "llm", False):
         cfg.llm.enabled = True
-    server = None
-    managed_server = False
-    try:
-        if llm_enabled:
-            try:
-                server = start_managed_server(
+
+    # Free VRAM before ASR: a server left by a previous run must not compete.
+    if stop_managed_server(cfg, pid_path=cfg.resolve("logs/llama-server.pid")):
+        err_console.print("[muted]старый llama-server остановлен перед обработкой[/muted]")
+
+    server_holder: list[Any] = []
+
+    def _before_report() -> None:
+        try:
+            server_holder.append(
+                start_managed_server(
                     cfg,
                     progress=lambda message: err_console.print(f"[muted]{message}[/muted]"),
                     log_path=cfg.resolve("logs/llama-server.log"),
                     pid_path=cfg.resolve("logs/llama-server.pid"),
                 )
-                managed_server = True
-            except LlamaError as exc:
-                raise ConfigError(f"LLM-отчёт: {exc}") from exc
-        with StageProgress(show=err_console.is_terminal) as progress:
-            pipeline = Pipeline(
-                cfg,
-                force=getattr(args, "force", False),
-                skip_diarization=getattr(args, "skip_diarization", False),
-                skip_llm=not llm_enabled,
-                num_speakers=getattr(args, "num_speakers", None),
-                max_speakers=getattr(args, "max_speakers", None),
-                device=getattr(args, "device", None),
-                profile=getattr(args, "profile", None),
-                output_dir=output_dir,
-                speaker_map=(
-                    str(args.speaker_map) if getattr(args, "speaker_map", None) else None
-                ),
-                progress=progress,
             )
-            result = pipeline.run(input_path)
-    finally:
-        if managed_server and stop_managed_server(
-            cfg, server, pid_path=cfg.resolve("logs/llama-server.pid")
-        ):
+        except LlamaError as exc:
+            raise ConfigError(f"LLM-отчёт: {exc}") from exc
+
+    def _after_report() -> None:
+        server = server_holder[0] if server_holder else None
+        if stop_managed_server(cfg, server, pid_path=cfg.resolve("logs/llama-server.pid")):
             err_console.print("[muted]llama-server остановлен после отчёта[/muted]")
+
+    with StageProgress(show=err_console.is_terminal) as progress:
+        pipeline = Pipeline(
+            cfg,
+            force=getattr(args, "force", False),
+            skip_diarization=getattr(args, "skip_diarization", False),
+            skip_llm=not llm_enabled,
+            num_speakers=getattr(args, "num_speakers", None),
+            max_speakers=getattr(args, "max_speakers", None),
+            device=getattr(args, "device", None),
+            profile=getattr(args, "profile", None),
+            output_dir=output_dir,
+            speaker_map=(
+                str(args.speaker_map) if getattr(args, "speaker_map", None) else None
+            ),
+            progress=progress,
+            before_report=_before_report if llm_enabled else None,
+            after_report=_after_report if llm_enabled else None,
+        )
+        result = pipeline.run(input_path)
     transcript = result.transcript
     rows = [
         ("Файл", Path(input_path).name),

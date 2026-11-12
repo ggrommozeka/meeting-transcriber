@@ -8,6 +8,7 @@ import platform
 import re
 import shutil
 import time
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -65,10 +66,14 @@ class Pipeline:
         output_dir: str | None = None,
         speaker_map: str | None = None,
         progress: Any | None = None,
+        before_report: Callable[[], None] | None = None,
+        after_report: Callable[[], None] | None = None,
     ) -> None:
         self.cfg = cfg
         self.force = force
         self.progress = progress
+        self.before_report = before_report
+        self.after_report = after_report
         self.skip_diarization = skip_diarization
         self.skip_llm = skip_llm
         self.speaker_map_path = Path(speaker_map).expanduser() if speaker_map else None
@@ -221,13 +226,19 @@ class Pipeline:
                 self.progress.skip_stage("llm_report", "LLM-отчёт")
         else:
             with self._stage_progress("llm_report", "LLM-отчёт"):
-                report, report_warnings = self._stage_report(
-                    transcript,
-                    visual.cards,
-                    work_dir,
-                    state,
-                    fingerprints["llm_report"],
-                )
+                if self.before_report is not None:
+                    self.before_report()
+                try:
+                    report, report_warnings = self._stage_report(
+                        transcript,
+                        visual.cards,
+                        work_dir,
+                        state,
+                        fingerprints["llm_report"],
+                    )
+                finally:
+                    if self.after_report is not None:
+                        self.after_report()
         timings["llm_report"] = round(time.perf_counter() - started, 3)
         warnings.extend(report_warnings)
 

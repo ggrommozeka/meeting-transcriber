@@ -104,9 +104,10 @@ Or generate it in the same run:
 meeting-transcriber transcribe -i meeting.mp4 --visual --llm
 ```
 
-Both paths stop the server automatically when generation is complete. If the
-server was started manually, its PID file is used for cleanup; a server without
-a PID file is left untouched.
+Both paths stop the server automatically when generation is complete. Before ASR,
+any stale `llama-server` on the configured port is stopped first, so it cannot
+consume VRAM needed for transcription. The report server is then started only
+after ASR and diarization have released the GPU.
 
 On an 8 GB GPU, run transcription and the LLM server separately: ASR (~4.6 GiB)
 and llama-server (~6.7 GiB) must not compete for VRAM. Video OCR runs on CPU.
