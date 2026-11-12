@@ -346,21 +346,32 @@ def _require_tui() -> None:
 
 def _tui_setup() -> int:
     _require_tui()
-    from .tui import run_setup
+    if os.environ.get("MT_TEXTUAL_FALLBACK") == "1":
+        from .tui import run_setup
 
-    run_setup()
-    return 0
+        run_setup()
+        return 0
+    from .tui import run_setup_flow
+
+    return run_setup_flow()
 
 
 def _tui_process(args: argparse.Namespace) -> int:
     _require_tui()
-    from .tui import run_process
+    if os.environ.get("MT_TEXTUAL_FALLBACK") == "1":
+        from .tui import run_process
 
-    run_process(
+        run_process(
+            input_path=getattr(args, "input", None),
+            output_dir=getattr(args, "output_dir", None),
+        )
+        return 0
+    from .tui import run_process_flow
+
+    return run_process_flow(
         input_path=getattr(args, "input", None),
         output_dir=getattr(args, "output_dir", None),
     )
-    return 0
 
 
 def _download_models(args: argparse.Namespace, cfg: AppConfig) -> int:
