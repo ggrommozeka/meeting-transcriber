@@ -163,6 +163,13 @@ class LLMConfig:
     max_items_per_section: int = 6
     max_summary_sentences: int = 5
     max_topic_summary_chars: int = 350
+    # Optional report profiles. `custom_prompt` overrides report_mode.
+    report_mode: str = "general"
+    custom_prompt: str | None = None
+    prompt_max_chars: int = 6000
+    max_task_drafts: int = 5
+    max_progress_updates: int = 20
+    max_new_tasks: int = 10
     report_style: str = "asd-ste100"
     num_ctx: int = 8192
     retries: int = 1
@@ -361,6 +368,21 @@ def validate_config(cfg: AppConfig) -> None:
         raise ConfigError("llm.max_summary_sentences must be >= 1")
     if cfg.llm.max_topic_summary_chars < 80:
         raise ConfigError("llm.max_topic_summary_chars must be >= 80")
+    if cfg.llm.report_mode not in {
+        "general",
+        "task_discussion",
+        "status_meeting",
+        "custom",
+    }:
+        raise ConfigError(
+            "llm.report_mode must be one of: general, task_discussion, status_meeting, custom"
+        )
+    if cfg.llm.custom_prompt and len(cfg.llm.custom_prompt) > cfg.llm.prompt_max_chars:
+        raise ConfigError("llm.custom_prompt exceeds llm.prompt_max_chars")
+    if cfg.llm.max_task_drafts < 1 or cfg.llm.max_progress_updates < 1 or cfg.llm.max_new_tasks < 1:
+        raise ConfigError(
+            "llm.max_task_drafts, max_progress_updates and max_new_tasks must be >= 1"
+        )
     if cfg.visual.backend != "tesseract":
         raise ConfigError(
             f"unsupported visual.backend '{cfg.visual.backend}'; supported: tesseract"

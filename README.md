@@ -402,6 +402,8 @@ llm:
   model: qwen3.5-9b
   max_topics: 6
   max_items_per_section: 6
+  report_mode: general        # general | task_discussion | status_meeting
+  custom_prompt: null         # one-run override; replaces report_mode
   report_style: asd-ste100   # "plain" = full report, no short-form caps
   chunk_chars: 5000
 ```
@@ -413,6 +415,10 @@ llm:
 5-sentence summary). `report_style: plain` returns the full report (12 topics,
 no per-section cap, summary up to 10 sentences). Override per run with
 `--report-style plain`.
+
+Report focus can be changed per run with `--report-mode task_discussion` or
+`--report-mode status_meeting`, or with a one-off `--prompt` / `--prompt-file`.
+The `process` wizard asks for this on a separate screen before starting.
 
 ## Docker
 
@@ -479,7 +485,7 @@ Real-model smoke test:
 
 ## Status
 
-- 72 unit/integration tests; `ruff` clean.
+- 74 unit/integration tests; `ruff` clean.
 - Native 87-minute run: 2m31s, 945 segments, 8 speakers, 4612 MiB peak VRAM.
 - Docker image builds (8.14 GB) and runs the full recording: 2m40s, 918
   segments, 8 speakers, 4612 MiB peak.
