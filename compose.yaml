@@ -33,10 +33,14 @@ services:
               count: 1
               capabilities: [gpu]
     # Example:
-    #   docker compose run --rm transcriber transcribe /data/input/meeting.wav \
+    #   docker compose run --rm transcriber transcribe \
+    #     -i /data/input/meeting.wav --output-dir /data/output \
     #     --config /app/config/docker.yaml
     command:
       - transcribe
+      - -i
       - /data/input/meeting.wav
+      - --output-dir
+      - /data/output
       - --config
       - /app/config/docker.yaml

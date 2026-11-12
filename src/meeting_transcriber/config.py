@@ -136,6 +136,19 @@ class VisualConfig:
 
 
 @dataclass
+class RuntimeConfig:
+    # External llama.cpp server used by the `report`/`process` workflows.
+    # "existing" uses llama_server as-is; "release" downloads a prebuilt
+    # archive; "build" clones a tag and compiles it.
+    llama_server: str | None = None
+    llama_source: str = "existing"
+    llama_tag: str = "latest"
+    llama_build_dir: str = "~/.local/llama.cpp"
+    llama_cuda: bool = True
+    llama_jobs: int = 0
+
+
+@dataclass
 class LLMConfig:
     enabled: bool = True
     base_url: str = "http://127.0.0.1:8080/v1"
@@ -179,6 +192,7 @@ class AppConfig:
     diarization: DiarizationConfig = field(default_factory=DiarizationConfig)
     terminology: TerminologyConfig = field(default_factory=TerminologyConfig)
     visual: VisualConfig = field(default_factory=VisualConfig)
+    runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
     pipeline: PipelineConfig = field(default_factory=PipelineConfig)
@@ -280,6 +294,7 @@ def load_config(path: str | Path | None = None, overrides: dict[str, Any] | None
         diarization=_build(DiarizationConfig, data["diarization"], "diarization"),
         terminology=_build(TerminologyConfig, data["terminology"], "terminology"),
         visual=_build(VisualConfig, data["visual"], "visual"),
+        runtime=_build(RuntimeConfig, data["runtime"], "runtime"),
         llm=_build(LLMConfig, data["llm"], "llm"),
         output=_build(OutputConfig, data["output"], "output"),
         pipeline=_build(PipelineConfig, data["pipeline"], "pipeline"),
@@ -367,6 +382,12 @@ def validate_config(cfg: AppConfig) -> None:
         raise ConfigError("visual.report_context_chars must be >= 0")
     if cfg.visual.align_window_seconds < 0:
         raise ConfigError("visual.align_window_seconds must be >= 0")
+    if cfg.runtime.llama_source not in {"existing", "release", "build"}:
+        raise ConfigError(
+            "runtime.llama_source must be one of: existing, release, build"
+        )
+    if cfg.runtime.llama_jobs < 0:
+        raise ConfigError("runtime.llama_jobs must be >= 0")
     if cfg.llm.report_style not in {"asd-ste100", "plain"}:
         raise ConfigError("llm.report_style must be 'asd-ste100' or 'plain'")
     if cfg.llm.num_ctx < 2048:

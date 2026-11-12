@@ -126,6 +126,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     video.add_argument("--force", action="store_true", help="Ignore cached stages")
 
+    subparsers.add_parser(
+        "setup", help="Open the interactive environment and llama.cpp setup wizard"
+    )
+
+    process = subparsers.add_parser(
+        "process", help="Open the interactive transcription and report wizard"
+    )
+    process.add_argument(
+        "-i", "--input", dest="input", type=Path, default=None, help="Input video/audio"
+    )
+    process.add_argument("--output-dir", default=None)
+
     extract = subparsers.add_parser(
         "extract-audio", help="Extract the audio track from a video/container with FFmpeg"
     )
@@ -263,6 +275,10 @@ def _ensure_nvidia_library_path() -> None:
 
 
 def _dispatch(args: argparse.Namespace) -> int:
+    if args.command == "setup":
+        return _tui_setup()
+    if args.command == "process":
+        return _tui_process(args)
     if args.command == "build-glossary":
         return _build_glossary(args)
     if args.command == "speakers":
@@ -296,6 +312,33 @@ def _dispatch(args: argparse.Namespace) -> int:
     if args.command == "transcribe-video":
         return _transcribe_video(args, cfg)
     raise ConfigError(f"unknown command: {args.command}")
+
+
+def _require_tui() -> None:
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        raise ConfigError(
+            "the interactive wizard needs a terminal. Use `transcribe`/`transcribe-video` "
+            "for non-interactive runs."
+        )
+
+
+def _tui_setup() -> int:
+    _require_tui()
+    from .tui import run_setup
+
+    run_setup()
+    return 0
+
+
+def _tui_process(args: argparse.Namespace) -> int:
+    _require_tui()
+    from .tui import run_process
+
+    run_process(
+        input_path=getattr(args, "input", None),
+        output_dir=getattr(args, "output_dir", None),
+    )
+    return 0
 
 
 def _download_models(args: argparse.Namespace, cfg: AppConfig) -> int:

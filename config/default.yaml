@@ -104,6 +104,15 @@ visual:
   align_window_seconds: 30
   ocr_timeout_seconds: 60
 
+# External llama.cpp runtime. `setup` writes the resolved path here.
+runtime:
+  llama_server: null
+  llama_source: existing      # existing | release | build
+  llama_tag: latest
+  llama_build_dir: ~/.local/llama.cpp
+  llama_cuda: true
+  llama_jobs: 0
+
 llm:
   enabled: true
   # llama.cpp server (scripts/start_llama_server.sh)
